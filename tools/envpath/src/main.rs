@@ -4,7 +4,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use cliutil::{error, warn};
+use cliutil::{error, print_info, print_version, warn};
 
 enum AppError {
     InvalidInput(String),
@@ -13,9 +13,16 @@ enum AppError {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "envpath")]
+#[command(name = "envpath", disable_version_flag = true)]
 struct Args {
-    command: String,
+    #[arg(short = 'v', long = "version")]
+    version: bool,
+
+    #[arg(short = 'i', long = "info")]
+    info: bool,
+
+    #[arg(required_unless_present_any = ["version", "info"])]
+    command: Option<String>,
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -48,7 +55,21 @@ fn main() {
 fn run() -> Result<(), AppError> {
     let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
-    if args.command.contains('/') {
+    if args.version {
+        print_version();
+        return Ok(());
+    }
+
+    if args.info {
+        print_info();
+        return Ok(());
+    }
+
+    let command = args
+        .command
+        .ok_or_else(|| AppError::InvalidInput("missing command".to_string()))?;
+
+    if command.contains('/') {
         return Err(AppError::InvalidInput(
             "command must be a bare name (no path separators)".to_string(),
         ));
@@ -73,7 +94,7 @@ fn run() -> Result<(), AppError> {
     let mut selected_index: Option<usize> = None;
 
     for (idx, dir) in path_entries.iter().enumerate() {
-        let candidate = dir.join(&args.command);
+        let candidate = dir.join(&command);
         if is_executable(&candidate) {
             resolved = Some(candidate);
             selected_index = Some(idx);
@@ -81,7 +102,7 @@ fn run() -> Result<(), AppError> {
         }
     }
 
-    println!("Command: {}", args.command);
+    println!("Command: {}", command);
     println!();
     println!("Resolved to:");
     match &resolved {

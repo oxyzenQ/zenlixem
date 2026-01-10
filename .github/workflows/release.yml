@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: verify (fmt / clippy / test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build (debug)
+        run: cargo build --all-targets
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test
+
+  build_artifacts:
+    name: build artifacts (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-amd64
+            target: x86_64-unknown-linux-gnu
+          - label: linux-aarch64
+            target: aarch64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build release binaries
+        env:
+          ZENLIXEM_BUILD_TARGET: ${{ matrix.label }}
+          ZENLIXEM_GIT_SHA: ${{ github.sha }}
+        run: |
+          cross build --release --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath
+
+      - name: Package tarball
+        run: |
+          set -euxo pipefail
+
+          dist_dir="dist/${{ matrix.label }}"
+          mkdir -p "${dist_dir}"
+
+          cp "target/${{ matrix.target }}/release/whoholds" "${dist_dir}/whoholds"
+          cp "target/${{ matrix.target }}/release/lasttouch" "${dist_dir}/lasttouch"
+          cp "target/${{ matrix.target }}/release/envpath" "${dist_dir}/envpath"
+
+          chmod +x "${dist_dir}/whoholds" "${dist_dir}/lasttouch" "${dist_dir}/envpath"
+
+          tarball="zenlixem-${{ matrix.label }}.tar.gz"
+          tar -C "${dist_dir}" -czf "${tarball}" .
+
+          sha_file="${tarball}.sha512sum"
+          sha512sum "${tarball}" > "${sha_file}"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zenlixem-${{ matrix.label }}
+          path: |
+            zenlixem-${{ matrix.label }}.tar.gz
+            zenlixem-${{ matrix.label }}.tar.gz.sha512sum
+
+  publish_release:
+    name: publish release
+    runs-on: ubuntu-latest
+    needs: build_artifacts
+
+    steps:
+      - name: Determine release type
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${tag}" == *-* ]]; then
+            echo "prerelease=true" >> "${GITHUB_OUTPUT}"
+            echo "make_latest=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+            echo "make_latest=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.make_latest }}
+          files: |
+            artifacts/**/zenlixem-*.tar.gz
+            artifacts/**/zenlixem-*.tar.gz.sha512sum

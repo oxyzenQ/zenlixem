@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cliutil::{error, warn};
+use cliutil::{error, print_info as print_suite_info, print_version, warn};
 use fsmeta::format_systemtime_ago;
 
 enum AppError {
@@ -15,9 +15,16 @@ enum AppError {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "lasttouch")]
+#[command(name = "lasttouch", disable_version_flag = true)]
 struct Args {
-    path: String,
+    #[arg(short = 'v', long = "version")]
+    version: bool,
+
+    #[arg(short = 'i', long = "info")]
+    info: bool,
+
+    #[arg(required_unless_present_any = ["version", "info"])]
+    path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +53,21 @@ fn main() {
 fn run() -> Result<(), AppError> {
     let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
-    let input = PathBuf::from(args.path);
+    if args.version {
+        print_version();
+        return Ok(());
+    }
+
+    if args.info {
+        print_suite_info();
+        return Ok(());
+    }
+
+    let path_arg = args
+        .path
+        .ok_or_else(|| AppError::InvalidInput("missing path".to_string()))?;
+
+    let input = PathBuf::from(path_arg);
     let path = if input.is_absolute() {
         input
     } else {

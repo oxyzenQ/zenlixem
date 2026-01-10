@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cliutil::error;
+use cliutil::{error, print_info, print_version};
 use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
 use procscan::{
     list_pids, read_comm_access, read_fd_links_access, read_proc_maps_access,
@@ -11,9 +11,16 @@ use procscan::{
 };
 
 #[derive(Parser, Debug)]
-#[command(name = "whoholds")]
+#[command(name = "whoholds", disable_version_flag = true)]
 struct Args {
-    target: String,
+    #[arg(short = 'v', long = "version")]
+    version: bool,
+
+    #[arg(short = 'i', long = "info")]
+    info: bool,
+
+    #[arg(required_unless_present_any = ["version", "info"])]
+    target: Option<String>,
 }
 
 enum AppError {
@@ -53,11 +60,25 @@ fn main() {
 fn run() -> Result<(), AppError> {
     let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
-    if let Ok(port) = args.target.parse::<u16>() {
+    if args.version {
+        print_version();
+        return Ok(());
+    }
+
+    if args.info {
+        print_info();
+        return Ok(());
+    }
+
+    let target = args
+        .target
+        .ok_or_else(|| AppError::InvalidInput("missing target".to_string()))?;
+
+    if let Ok(port) = target.parse::<u16>() {
         return whoholds_port(port);
     }
 
-    let path = PathBuf::from(&args.target);
+    let path = PathBuf::from(&target);
     whoholds_path(&path)
 }
 
