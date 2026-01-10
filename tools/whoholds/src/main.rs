@@ -1,10 +1,10 @@
 use clap::Parser;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cliutil::{error, warn};
+use cliutil::error;
 use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
 use procscan::{list_pids, read_comm, read_fd_links, read_proc_maps, read_proc_net_sockets};
 
@@ -51,37 +51,45 @@ fn whoholds_path(path: &Path) -> Result<(), String> {
     let target_id = file_id_for_path(path).map_err(|e| format!("{}: {}", path.display(), e))?;
     let (tmaj, tmin) = dev_major_minor(target_id.dev);
 
-    let mut holders: BTreeMap<i32, BTreeSet<Reason>> = BTreeMap::new();
+    let mut holders: BTreeMap<i32, Reason> = BTreeMap::new();
+    let mut skipped_permission_denied: HashSet<i32> = HashSet::new();
 
     let pids = list_pids().map_err(|e| e.to_string())?;
 
     for pid in pids {
+        let mut open_fd_denied = false;
         match scan_pid_open_fd_file(pid, target_id) {
             Ok(true) => {
-                holders.entry(pid).or_default().insert(Reason::OpenFd);
+                holders.insert(pid, Reason::OpenFd);
+                continue;
             }
             Ok(false) => {}
             Err(e) => {
                 if e.kind() == io::ErrorKind::PermissionDenied {
-                    warn(&format!("PID {pid}: permission denied"));
+                    open_fd_denied = true;
                 }
             }
         }
 
+        let mut maps_denied = false;
         match scan_pid_mmap_file(pid, tmaj, tmin, target_id.inode) {
             Ok(true) => {
-                holders.entry(pid).or_default().insert(Reason::Mmap);
+                holders.insert(pid, Reason::Mmap);
             }
             Ok(false) => {}
             Err(e) => {
                 if e.kind() == io::ErrorKind::PermissionDenied {
-                    warn(&format!("PID {pid}: permission denied"));
+                    maps_denied = true;
                 }
             }
+        }
+
+        if open_fd_denied && maps_denied {
+            skipped_permission_denied.insert(pid);
         }
     }
 
-    print_holders(holders);
+    print_holders(holders, skipped_permission_denied.len());
     Ok(())
 }
 
@@ -94,10 +102,11 @@ fn whoholds_port(port: u16) -> Result<(), String> {
         .map(|s| s.inode)
         .collect();
 
-    let mut holders: BTreeMap<i32, BTreeSet<Reason>> = BTreeMap::new();
+    let mut holders: BTreeMap<i32, Reason> = BTreeMap::new();
+    let mut skipped_permission_denied: HashSet<i32> = HashSet::new();
 
     if target_inodes.is_empty() {
-        print_holders(holders);
+        print_holders(holders, skipped_permission_denied.len());
         return Ok(());
     }
 
@@ -106,18 +115,18 @@ fn whoholds_port(port: u16) -> Result<(), String> {
     for pid in pids {
         match scan_pid_open_fd_socket(pid, &target_inodes) {
             Ok(true) => {
-                holders.entry(pid).or_default().insert(Reason::OpenFd);
+                holders.insert(pid, Reason::OpenFd);
             }
             Ok(false) => {}
             Err(e) => {
                 if e.kind() == io::ErrorKind::PermissionDenied {
-                    warn(&format!("PID {pid}: permission denied"));
+                    skipped_permission_denied.insert(pid);
                 }
             }
         }
     }
 
-    print_holders(holders);
+    print_holders(holders, skipped_permission_denied.len());
     Ok(())
 }
 
@@ -184,7 +193,13 @@ fn parse_socket_inode(link: &str) -> Option<u64> {
     rest.parse::<u64>().ok()
 }
 
-fn print_holders(holders: BTreeMap<i32, BTreeSet<Reason>>) {
+fn print_holders(holders: BTreeMap<i32, Reason>, skipped_permission_denied: usize) {
+    if skipped_permission_denied > 0 {
+        println!(
+            "Partial result: {skipped_permission_denied} processes skipped (permission denied)"
+        );
+    }
+
     if holders.is_empty() {
         println!("No active holders detected.");
         return;
@@ -193,14 +208,8 @@ fn print_holders(holders: BTreeMap<i32, BTreeSet<Reason>>) {
     println!("Held by:");
     println!("PID   COMMAND     REASON");
 
-    for (pid, reasons) in holders {
+    for (pid, reason) in holders {
         let comm = read_comm(pid).unwrap_or_else(|_| "<unknown>".to_string());
-        let reason_str = reasons
-            .iter()
-            .map(|r| r.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        println!("{pid:<5} {comm:<11} {reason_str}");
+        println!("{pid:<5} {comm:<11} {}", reason.as_str());
     }
 }
