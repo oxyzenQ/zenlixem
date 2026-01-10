@@ -1,0 +1,15 @@
+[package]
+name = "lasttouch"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description.workspace = true
+readme.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+cliutil = { path = "../../crates/cliutil" }
+fsmeta = { path = "../../crates/fsmeta" }

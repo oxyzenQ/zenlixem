@@ -1,0 +1,27 @@
+[workspace]
+members = [
+  "crates/procscan",
+  "crates/fsmeta",
+  "crates/cliutil",
+  "tools/whoholds",
+  "tools/lasttouch",
+  "tools/envpath",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["rezky_nightky"]
+repository = "https://github.com/oxyzenq/zenxyz"
+homepage = "https://github.com/oxyzenq/zenxyz"
+description = "zenxyz: Linux CLI suite (whoholds, lasttouch, envpath)"
+readme = "../../README.md"
+license = "MIT"
+
+[workspace.dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
