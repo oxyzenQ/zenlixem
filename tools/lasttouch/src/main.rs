@@ -9,6 +9,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use cliutil::{error, warn};
 use fsmeta::format_systemtime_ago;
 
+enum AppError {
+    InvalidInput(String),
+    Fatal(String),
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "lasttouch")]
 struct Args {
@@ -25,32 +30,48 @@ struct TouchInfo {
 }
 
 fn main() {
-    if let Err(e) = run() {
-        error(&e);
-        std::process::exit(1);
+    match run() {
+        Ok(()) => {}
+        Err(AppError::InvalidInput(e)) => {
+            error(&e);
+            std::process::exit(1);
+        }
+        Err(AppError::Fatal(e)) => {
+            error(&e);
+            std::process::exit(2);
+        }
     }
 }
 
-fn run() -> Result<(), String> {
-    let args = Args::parse();
+fn run() -> Result<(), AppError> {
+    let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
     let input = PathBuf::from(args.path);
     let path = if input.is_absolute() {
         input
     } else {
-        let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+        let cwd = std::env::current_dir().map_err(|e| AppError::Fatal(e.to_string()))?;
         cwd.join(input)
     };
 
-    let md = fs::metadata(&path).map_err(|e| format!("{}: {}", path.display(), e))?;
-    let mtime = md.modified().map_err(|e| e.to_string())?;
+    let md = match fs::metadata(&path) {
+        Ok(md) => md,
+        Err(e) => {
+            let msg = format!("{}: {}", path.display(), e);
+            if e.kind() == io::ErrorKind::NotFound {
+                return Err(AppError::InvalidInput(msg));
+            }
+            return Err(AppError::Fatal(msg));
+        }
+    };
+    let mtime = md.modified().map_err(|e| AppError::Fatal(e.to_string()))?;
 
-    if let Some(info) = try_audit_log(&path)? {
+    if let Some(info) = try_audit_log(&path).map_err(AppError::Fatal)? {
         print_info(&info);
         return Ok(());
     }
 
-    if let Some(info) = try_journalctl(&path)? {
+    if let Some(info) = try_journalctl(&path).map_err(AppError::Fatal)? {
         print_info(&info);
         return Ok(());
     }

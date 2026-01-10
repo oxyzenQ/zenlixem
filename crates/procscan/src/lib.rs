@@ -2,6 +2,22 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
+pub enum ProcAccess<T> {
+    Ok(T),
+    PermissionDenied,
+    Gone,
+    Fatal(io::Error),
+}
+
+fn classify_proc_io_error<T>(e: io::Error) -> ProcAccess<T> {
+    match e.kind() {
+        io::ErrorKind::NotFound => ProcAccess::Gone,
+        io::ErrorKind::PermissionDenied => ProcAccess::PermissionDenied,
+        _ => ProcAccess::Fatal(e),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcMapEntry {
     pub dev_major: u32,
@@ -32,6 +48,15 @@ pub fn read_comm(pid: i32) -> io::Result<String> {
     Ok(contents.trim_end_matches(['\n', '\r']).to_string())
 }
 
+pub fn read_comm_access(pid: i32) -> ProcAccess<String> {
+    let path = format!("/proc/{pid}/comm");
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => return classify_proc_io_error(e),
+    };
+    ProcAccess::Ok(contents.trim_end_matches(['\n', '\r']).to_string())
+}
+
 pub fn fd_dir(pid: i32) -> PathBuf {
     PathBuf::from(format!("/proc/{pid}/fd"))
 }
@@ -57,6 +82,37 @@ pub fn read_fd_links(pid: i32) -> io::Result<Vec<(i32, PathBuf, String)>> {
 
     out.sort_by_key(|(fd, _, _)| *fd);
     Ok(out)
+}
+
+pub fn read_fd_links_access(pid: i32) -> ProcAccess<Vec<(i32, PathBuf, String)>> {
+    let dir = fd_dir(pid);
+    let mut out = Vec::new();
+
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) => return classify_proc_io_error(e),
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let name = entry.file_name();
+        let fd_str = name.to_string_lossy();
+        let Ok(fd) = fd_str.parse::<i32>() else {
+            continue;
+        };
+
+        let fd_path = entry.path();
+        match fs::read_link(&fd_path) {
+            Ok(target) => out.push((fd, fd_path, target.to_string_lossy().to_string())),
+            Err(_) => out.push((fd, fd_path, String::new())),
+        }
+    }
+
+    out.sort_by_key(|(fd, _, _)| *fd);
+    ProcAccess::Ok(out)
 }
 
 fn parse_hex_u32(s: &str) -> Option<u32> {
@@ -116,6 +172,54 @@ pub fn read_proc_maps(pid: i32) -> io::Result<Vec<ProcMapEntry>> {
     Ok(out)
 }
 
+pub fn read_proc_maps_access(pid: i32) -> ProcAccess<Vec<ProcMapEntry>> {
+    let path = format!("/proc/{pid}/maps");
+    let f = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => return classify_proc_io_error(e),
+    };
+    let reader = io::BufReader::new(f);
+
+    let mut out = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => return classify_proc_io_error(e),
+        };
+        let mut parts = line.split_whitespace();
+
+        let _addr = parts.next();
+        let _perms = parts.next();
+        let _offset = parts.next();
+        let dev = parts.next();
+        let inode = parts.next();
+
+        let (Some(dev), Some(inode)) = (dev, inode) else {
+            continue;
+        };
+
+        let Some((dev_major, dev_minor)) = parse_dev_hex(dev) else {
+            continue;
+        };
+
+        let Ok(inode) = inode.parse::<u64>() else {
+            continue;
+        };
+
+        let pathname = parts.next().map(|s| s.to_string());
+
+        out.push(ProcMapEntry {
+            dev_major,
+            dev_minor,
+            inode,
+            pathname,
+        });
+    }
+
+    ProcAccess::Ok(out)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProcNetProto {
     Tcp,
@@ -143,13 +247,26 @@ fn parse_proc_net_file(path: &Path, proto: ProcNetProto) -> io::Result<Vec<ProcN
             continue;
         }
 
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 10 {
+        let mut it = line.split_whitespace();
+        let _sl = it.next();
+        let Some(local_address) = it.next() else {
+            continue;
+        };
+
+        let mut ok = true;
+        for _ in 0..7 {
+            if it.next().is_none() {
+                ok = false;
+                break;
+            }
+        }
+        if !ok {
             continue;
         }
 
-        let local_address = fields[1];
-        let inode_field = fields[9];
+        let Some(inode_field) = it.next() else {
+            continue;
+        };
 
         let Some((_addr_hex, port_hex)) = local_address.split_once(':') else {
             continue;
@@ -204,5 +321,21 @@ mod tests {
     #[test]
     fn parse_dev_hex_bad() {
         assert_eq!(parse_dev_hex("zz:01"), None);
+    }
+
+    #[test]
+    fn access_gone_on_nonexistent_pid() {
+        match read_comm_access(-1) {
+            ProcAccess::Gone => {}
+            other => panic!("unexpected result: {other:?}"),
+        }
+        match read_fd_links_access(-1) {
+            ProcAccess::Gone => {}
+            other => panic!("unexpected result: {other:?}"),
+        }
+        match read_proc_maps_access(-1) {
+            ProcAccess::Gone => {}
+            other => panic!("unexpected result: {other:?}"),
+        }
     }
 }

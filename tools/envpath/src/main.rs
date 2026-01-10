@@ -6,6 +6,12 @@ use std::path::{Path, PathBuf};
 
 use cliutil::{error, warn};
 
+enum AppError {
+    InvalidInput(String),
+    #[allow(dead_code)]
+    Fatal(String),
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "envpath")]
 struct Args {
@@ -26,17 +32,26 @@ fn is_executable(path: &Path) -> bool {
 }
 
 fn main() {
-    if let Err(e) = run() {
-        error(&e);
-        std::process::exit(1);
+    match run() {
+        Ok(()) => {}
+        Err(AppError::InvalidInput(e)) => {
+            error(&e);
+            std::process::exit(1);
+        }
+        Err(AppError::Fatal(e)) => {
+            error(&e);
+            std::process::exit(2);
+        }
     }
 }
 
-fn run() -> Result<(), String> {
-    let args = Args::parse();
+fn run() -> Result<(), AppError> {
+    let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
 
     if args.command.contains('/') {
-        return Err("command must be a bare name (no path separators)".to_string());
+        return Err(AppError::InvalidInput(
+            "command must be a bare name (no path separators)".to_string(),
+        ));
     }
 
     let path_var = env::var_os("PATH").unwrap_or_default();
@@ -86,7 +101,9 @@ fn run() -> Result<(), String> {
     }
 
     if resolved.is_none() {
-        return Err("command not found in PATH".to_string());
+        return Err(AppError::InvalidInput(
+            "command not found in PATH".to_string(),
+        ));
     }
 
     Ok(())
