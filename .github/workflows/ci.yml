@@ -1,3 +1,4 @@
+---
 name: CI
 
 on:
@@ -5,6 +6,8 @@ on:
     branches:
       - main
   pull_request:
+    branches:
+      - main
 
 jobs:
   lint_test:
@@ -25,14 +28,17 @@ jobs:
       - name: cargo build (debug)
         run: cargo build --all-targets
 
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
+      - name: yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: .github/workflows
+          config_file: .yamllint.yml
 
-      - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: actionlint
+        uses: rhysd/actionlint@v1
 
-      - name: cargo test
-        run: cargo test
+      - name: build.sh check-all
+        run: bash ./build.sh check-all --verbose
 
   build:
     name: build (${{ matrix.label }})

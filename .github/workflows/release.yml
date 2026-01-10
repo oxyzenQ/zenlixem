@@ -1,3 +1,4 @@
+---
 name: Release
 
 on:
@@ -24,17 +25,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo build (debug)
-        run: cargo build --all-targets
+      - name: yamllint
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          file_or_dir: .github/workflows
+          config_file: .yamllint.yml
 
-      - name: cargo fmt
-        run: cargo fmt --all -- --check
+      - name: actionlint
+        uses: rhysd/actionlint@v1
 
-      - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: cargo test
-        run: cargo test
+      - name: build.sh check-all
+        run: bash ./build.sh check-all --verbose
 
   build_artifacts:
     name: build artifacts (${{ matrix.label }})
@@ -46,8 +47,10 @@ jobs:
         include:
           - label: linux-amd64
             target: x86_64-unknown-linux-gnu
+            profile: linux-amd64-universal
           - label: linux-aarch64
             target: aarch64-unknown-linux-gnu
+            profile: linux-aarch64-universal
 
     steps:
       - uses: actions/checkout@v4
@@ -66,10 +69,10 @@ jobs:
 
       - name: Build release binaries
         env:
-          ZENLIXEM_BUILD_TARGET: ${{ matrix.label }}
+          ZENLIXEM_BUILD_TARGET: ${{ matrix.profile }}
           ZENLIXEM_GIT_SHA: ${{ github.sha }}
         run: |
-          cross build --release --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath
+          cross build --profile "${{ matrix.profile }}" --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath
 
       - name: Package tarball
         run: |
@@ -78,9 +81,9 @@ jobs:
           dist_dir="dist/${{ matrix.label }}"
           mkdir -p "${dist_dir}"
 
-          cp "target/${{ matrix.target }}/release/whoholds" "${dist_dir}/whoholds"
-          cp "target/${{ matrix.target }}/release/lasttouch" "${dist_dir}/lasttouch"
-          cp "target/${{ matrix.target }}/release/envpath" "${dist_dir}/envpath"
+          cp "target/${{ matrix.target }}/${{ matrix.profile }}/whoholds" "${dist_dir}/whoholds"
+          cp "target/${{ matrix.target }}/${{ matrix.profile }}/lasttouch" "${dist_dir}/lasttouch"
+          cp "target/${{ matrix.target }}/${{ matrix.profile }}/envpath" "${dist_dir}/envpath"
 
           chmod +x "${dist_dir}/whoholds" "${dist_dir}/lasttouch" "${dist_dir}/envpath"
 

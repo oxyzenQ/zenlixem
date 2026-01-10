@@ -15,7 +15,7 @@ edition = "2021"
 authors = ["rezky_nightky"]
 repository = "https://github.com/oxyzenq/zenlixem"
 homepage = "https://github.com/oxyzenq/zenlixem"
-description = "zenlixem: Linux CLI suite (whoholds, lasttouch, envpath)"
+description = "zenlixem is a small, Linux-focused CLI suite for system introspection."
 readme = "../../README.md"
 license = "MIT"
 
@@ -25,3 +25,31 @@ clap = { version = "4", features = ["derive"] }
 [profile.release-with-debug]
 inherits = "release"
 debug = true
+
+[profile.linux-amd64-universal]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.linux-amd64-universal-tiny]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[profile.linux-aarch64-universal]
+inherits = "release"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+[profile.linux-aarch64-universal-tiny]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

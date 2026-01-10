@@ -139,6 +139,47 @@ setup_build_cache() {
     fi
 }
 
+git_sha() {
+    if command -v git >/dev/null 2>&1; then
+        git rev-parse HEAD 2>/dev/null || true
+    fi
+}
+
+build_profile_and_stage_release() {
+    local profile="$1"
+    local build_label="$2"
+
+    log_step "Building optimized profile: ${profile}"
+
+    export ZENLIXEM_BUILD_TARGET="${build_label}"
+    local sha
+    sha=$(git_sha)
+    if [ -n "${sha}" ]; then
+        export ZENLIXEM_GIT_SHA="${sha}"
+    fi
+
+    if cargo build --profile "${profile}" --target "${TARGET}" --jobs "${MAX_JOBS}"; then
+        log_success "Profile build complete"
+    else
+        log_error "Profile build failed"
+        return 1
+    fi
+
+    local src_dir="target/${TARGET}/${profile}"
+    local dst_dir="target/${TARGET}/release"
+    mkdir -p "${dst_dir}"
+
+    for bin in "${TOOL_BINARIES[@]}"; do
+        local src="${src_dir}/${bin}"
+        local dst="${dst_dir}/${bin}"
+        if [ -f "${src}" ]; then
+            cp "${src}" "${dst}"
+        fi
+    done
+
+    log_success "Staged binaries into ${dst_dir}"
+}
+
 show_system_info() {
     log_info "Build Configuration:"
     echo "  ├─ OS: $(uname -s) $(uname -m)"
@@ -416,6 +457,10 @@ COMMANDS:
     debug           Build debug version (default)
     release         Build optimized release version
     release-debug   Build release with debug symbols
+    linux-amd64-universal        Build Linux x86_64 optimized (universal)
+    linux-amd64-universal-tiny   Build Linux x86_64 size-optimized (tiny)
+    linux-aarch64-universal      Build Linux aarch64 optimized (universal)
+    linux-aarch64-universal-tiny Build Linux aarch64 size-optimized (tiny)
     pro-linux-amd64  Build optimized release for Linux x86_64 (universal)
     pro-linux-arm64  Build optimized release for Linux aarch64 (universal)
     test            Run test suite
@@ -443,6 +488,8 @@ ENVIRONMENT VARIABLES:
 
 EXAMPLES:
     ./build.sh release                  # Build release version
+    ./build.sh linux-amd64-universal      # Optimized build, staged into target/<triple>/release
+    ./build.sh linux-amd64-universal-tiny # Tiny build, staged into target/<triple>/release
     ./build.sh pro-linux-amd64           # Build Linux x86_64 release
     ./build.sh pro-linux-arm64           # Build Linux aarch64 release
     ./build.sh check-all                # Run all quality checks
@@ -530,6 +577,30 @@ main() {
             check_rust_toolchain
             show_system_info
             build_release_with_debug
+            ;;
+        linux-amd64-universal)
+            TARGET="x86_64-unknown-linux-gnu"
+            check_rust_toolchain
+            show_system_info
+            build_profile_and_stage_release "linux-amd64-universal" "linux-amd64-universal"
+            ;;
+        linux-amd64-universal-tiny)
+            TARGET="x86_64-unknown-linux-gnu"
+            check_rust_toolchain
+            show_system_info
+            build_profile_and_stage_release "linux-amd64-universal-tiny" "linux-amd64-universal-tiny"
+            ;;
+        linux-aarch64-universal)
+            TARGET="aarch64-unknown-linux-gnu"
+            check_rust_toolchain
+            show_system_info
+            build_profile_and_stage_release "linux-aarch64-universal" "linux-aarch64-universal"
+            ;;
+        linux-aarch64-universal-tiny)
+            TARGET="aarch64-unknown-linux-gnu"
+            check_rust_toolchain
+            show_system_info
+            build_profile_and_stage_release "linux-aarch64-universal-tiny" "linux-aarch64-universal-tiny"
             ;;
         pro-linux-amd64)
             TARGET="x86_64-unknown-linux-gnu"

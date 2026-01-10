@@ -1,0 +1,5 @@
+[alias]
+linux-amd64-universal = "build --profile linux-amd64-universal --target x86_64-unknown-linux-gnu"
+linux-amd64-universal-tiny = "build --profile linux-amd64-universal-tiny --target x86_64-unknown-linux-gnu"
+linux-aarch64-universal = "build --profile linux-aarch64-universal --target aarch64-unknown-linux-gnu"
+linux-aarch64-universal-tiny = "build --profile linux-aarch64-universal-tiny --target aarch64-unknown-linux-gnu"

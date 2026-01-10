@@ -15,9 +15,9 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 
 - `lint_test`
   - `cargo build --all-targets` (debug)
-  - `cargo fmt --all -- --check`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `cargo test`
+  - `yamllint .github/workflows/*`
+  - `actionlint .github/workflows/*`
+  - `./build.sh check-all --verbose`
 
 - `build` (matrix)
   - Builds release binaries for:
@@ -34,10 +34,9 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 **Gate (must be green before publishing)**
 
 - `verify` job runs the same checks as CI:
-  - `cargo build --all-targets` (debug)
-  - `cargo fmt --all -- --check`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `cargo test`
+  - `yamllint .github/workflows/*`
+  - `actionlint .github/workflows/*`
+  - `./build.sh check-all --verbose`
 
 **Artifacts**
 
@@ -88,3 +87,30 @@ git push origin v1.0.1
 ```
 
 The workflow will build, package, and publish the release assets automatically.
+
+## Local checks (required before pushing core/workflow changes)
+
+Run these from the repository root:
+
+```bash
+yamllint .github/workflows/*
+actionlint .github/workflows/*
+./build.sh check-all --verbose
+```
+
+## Local optimized builds
+
+The repository provides `cargo` aliases (via `.cargo/config.toml`) and matching `build.sh` commands.
+
+Examples:
+
+```bash
+cargo linux-amd64-universal
+cargo linux-amd64-universal-tiny
+cargo linux-aarch64-universal
+cargo linux-aarch64-universal-tiny
+```
+
+These commands build using custom Cargo profiles and stage the resulting binaries into:
+
+`target/<target-triple>/release/`

@@ -4,7 +4,7 @@ const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
 const ANSI_RESET: &str = "\x1b[0m";
 
-const SUITE_NAME: &str = "Zenlixem";
+const SUITE_NAME: &str = "zenlixem";
 
 pub fn warn(message: &str) {
     let mut stderr = io::stderr();

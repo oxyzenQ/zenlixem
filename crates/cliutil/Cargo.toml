@@ -8,5 +8,6 @@ homepage.workspace = true
 description.workspace = true
 readme.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
