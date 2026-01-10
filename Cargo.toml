@@ -13,9 +13,9 @@ resolver = "2"
 version = "1.0.0"
 edition = "2021"
 authors = ["rezky_nightky"]
-repository = "https://github.com/oxyzenq/zenxyz"
-homepage = "https://github.com/oxyzenq/zenxyz"
-description = "zenxyz: Linux CLI suite (whoholds, lasttouch, envpath)"
+repository = "https://github.com/oxyzenq/zenlixem"
+homepage = "https://github.com/oxyzenq/zenlixem"
+description = "zenlixem: Linux CLI suite (whoholds, lasttouch, envpath)"
 readme = "../../README.md"
 license = "MIT"
 

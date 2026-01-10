@@ -1,6 +1,6 @@
-# zenxyz
+# zenlixem
 
-zenxyz is a small, Linux-focused CLI suite for system introspection.
+zenlixem is a small, Linux-focused CLI suite for system introspection.
 
 ## Tools (v1.0.0)
 

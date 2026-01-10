@@ -18,7 +18,7 @@ Thumbs.db
 *.bak
 
 # Secret
-project-zenxyz-*.md
+project-zenlixem-*.md
 .env
 
 # Benchmark artifacts
@@ -28,4 +28,4 @@ dist
 /dist/
 
 # error log
-project-zenxyz-log-error.txt
+project-zenlixem-log-error.txt

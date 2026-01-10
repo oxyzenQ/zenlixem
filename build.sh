@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# ZENXYZ BUILD AUTOMATION SCRIPT
+# ZENLIXEM BUILD AUTOMATION SCRIPT
 # =============================================================================
 # Optimized build script with intelligent core detection and advanced caching
 # Author: rezky_nightky
@@ -17,7 +17,7 @@ readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
 # Configuration with intelligent defaults
-readonly PROJECT_NAME="ZENXYZ"
+readonly PROJECT_NAME="ZENLIXEM"
 
 default_target() {
     if command -v rustc >/dev/null 2>&1; then
@@ -31,7 +31,7 @@ default_target() {
     echo "x86_64-unknown-linux-gnu"
 }
 
-TARGET="${ZENXYZ_TARGET:-$(default_target)}"
+TARGET="${ZENLIXEM_TARGET:-$(default_target)}"
 export RUST_BACKTRACE="${RUST_BACKTRACE:-1}"
 
 readonly TOOL_BINARIES=("whoholds" "lasttouch" "envpath")
@@ -46,7 +46,7 @@ calculate_jobs() {
     echo "$jobs"
 }
 
-MAX_JOBS="${ZENXYZ_JOBS:-$(calculate_jobs)}"
+MAX_JOBS="${ZENLIXEM_JOBS:-$(calculate_jobs)}"
 export MAKEFLAGS="-j${MAX_JOBS}"
 export CARGO_BUILD_JOBS="${MAX_JOBS}"
 
@@ -406,7 +406,7 @@ run_benchmark() {
 show_help() {
     cat << 'EOF'
 ╔════════════════════════════════════════════════════════════════╗
-║          ZENXYZ Build Script - Stellar 4.0                ║
+║          ZENLIXEM Build Script - Stellar 4.0                ║
 ╚════════════════════════════════════════════════════════════════╝
 
 USAGE:
@@ -437,8 +437,8 @@ OPTIONS:
     --verbose       Enable verbose output
 
 ENVIRONMENT VARIABLES:
-    ZENXYZ_JOBS     Override CPU core limit (default: auto)
-    ZENXYZ_TARGET   Override build target (default: rustc host target)
+    ZENLIXEM_JOBS     Override CPU core limit (default: auto)
+    ZENLIXEM_TARGET   Override build target (default: rustc host target)
     RUST_BACKTRACE      Control backtrace verbosity (default: 1)
 
 EXAMPLES:
@@ -447,7 +447,7 @@ EXAMPLES:
     ./build.sh pro-linux-arm64           # Build Linux aarch64 release
     ./build.sh check-all                # Run all quality checks
     ./build.sh ci                       # Run CI pipeline
-    ZENXYZ_JOBS=4 ./build.sh all    # Full build with 4 cores
+    ZENLIXEM_JOBS=4 ./build.sh all    # Full build with 4 cores
     ./build.sh --verbose release        # Verbose release build
 
 TOOLS INTEGRATION:
