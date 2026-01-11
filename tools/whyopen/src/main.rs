@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{error::ErrorKind, Parser};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,17 +17,40 @@ use procscan::{
 const COMMAND_COL_WIDTH: usize = 16;
 
 #[derive(Parser, Debug)]
-#[command(name = "whyopen", disable_version_flag = true)]
+#[command(
+    name = "whyopen",
+    disable_version_flag = true,
+    about = "Explain why a path or port is open",
+    long_about = "whyopen inspects running processes to explain why a file path or port is currently in use.\n\nIt reports evidence like open file descriptors, memory mappings, and sockets. When procfs access is restricted, results may be partial.",
+    after_help = r#"EXAMPLES:
+  whyopen /var/log/syslog
+  whyopen 443
+  whyopen --json 443
+"#
+)]
 struct Args {
-    #[arg(short = 'v', long = "version")]
+    #[arg(short = 'v', long = "version", help = "Print version information")]
     version: bool,
 
-    #[arg(short = 'i', long = "info")]
+    #[arg(
+        short = 'i',
+        long = "info",
+        help = "Show build and version information"
+    )]
     info: bool,
 
-    #[arg(long = "json")]
+    #[arg(
+        long = "json",
+        conflicts_with_all = ["version", "info"],
+        help = "Output result as JSON"
+    )]
     json: bool,
 
+    #[arg(
+        value_name = "TARGET",
+        required_unless_present_any = ["version", "info"],
+        help = "File path or port number to inspect"
+    )]
     target: Option<String>,
 }
 
@@ -64,10 +87,14 @@ fn main() {
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
+            if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+                let _ = e.print();
+                std::process::exit(0);
+            }
             if json_requested {
                 print_json_error(AppError::InvalidInput(e.to_string()));
             } else {
-                error(&e.to_string());
+                let _ = e.print();
             }
             std::process::exit(1);
         }

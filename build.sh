@@ -31,6 +31,52 @@ default_target() {
     echo "x86_64-unknown-linux-gnu"
 }
 
+install_manpages() {
+    local dest="${ZENLIXEM_MAN_DIR:-/usr/local/share/man/man1}"
+    log_step "Installing manpages to ${dest}"
+    mkdir -p "${dest}"
+    cp -f man/*.1 "${dest}/"
+    log_success "Manpages installed"
+}
+
+install_completions() {
+    local shell="${ZENLIXEM_SHELL:-}"
+    local dest="${ZENLIXEM_COMPLETIONS_DIR:-}"
+
+    if [ -z "${shell}" ]; then
+        shell="$(basename "${SHELL:-}" 2>/dev/null || true)"
+    fi
+
+    if [ -z "${shell}" ]; then
+        log_error "Cannot detect shell (SHELL is not set). Set ZENLIXEM_SHELL=bash|zsh|fish."
+        return 1
+    fi
+
+    case "${shell}" in
+        bash)
+            if [ -z "${dest}" ]; then dest="/usr/local/share/bash-completion/completions"; fi
+            mkdir -p "${dest}"
+            cargo run -q -p zenlixem -- completions bash > "${dest}/zenlixem"
+            ;;
+        zsh)
+            if [ -z "${dest}" ]; then dest="/usr/local/share/zsh/site-functions"; fi
+            mkdir -p "${dest}"
+            cargo run -q -p zenlixem -- completions zsh > "${dest}/_zenlixem"
+            ;;
+        fish)
+            if [ -z "${dest}" ]; then dest="/usr/local/share/fish/vendor_completions.d"; fi
+            mkdir -p "${dest}"
+            cargo run -q -p zenlixem -- completions fish > "${dest}/zenlixem.fish"
+            ;;
+        *)
+            log_error "Unsupported shell for completion install: ${shell} (use bash|zsh|fish)"
+            return 1
+            ;;
+    esac
+
+    log_success "Completions installed for ${shell}"
+}
+
 TARGET="${ZENLIXEM_TARGET:-$(default_target)}"
 export RUST_BACKTRACE="${RUST_BACKTRACE:-1}"
 
@@ -475,6 +521,9 @@ COMMANDS:
     all             Full pipeline (check + debug + release + test)
     ci              CI pipeline (check-all + release)
     stats           Show build cache statistics
+    install-man     Install manpages (man/*.1) to /usr/local/share/man/man1
+    install-comp    Install shell completions (bash/zsh/fish)
+    install         Install manpages + completions
     help            Show this help
 
 OPTIONS:
@@ -485,6 +534,9 @@ ENVIRONMENT VARIABLES:
     ZENLIXEM_JOBS     Override CPU core limit (default: auto)
     ZENLIXEM_TARGET   Override build target (default: rustc host target)
     RUST_BACKTRACE      Control backtrace verbosity (default: 1)
+    ZENLIXEM_SHELL    Override shell for install-comp (bash|zsh|fish)
+    ZENLIXEM_MAN_DIR  Override manpage install dir (default: /usr/local/share/man/man1)
+    ZENLIXEM_COMPLETIONS_DIR Override completion install dir (shell-specific default)
 
 EXAMPLES:
     ./build.sh release                  # Build release version
@@ -494,6 +546,7 @@ EXAMPLES:
     ./build.sh pro-linux-arm64           # Build Linux aarch64 release
     ./build.sh check-all                # Run all quality checks
     ./build.sh ci                       # Run CI pipeline
+    sudo ./build.sh install              # Install manpages + completions
     ZENLIXEM_JOBS=4 ./build.sh all    # Full build with 4 cores
     ./build.sh --verbose release        # Verbose release build
 
@@ -655,6 +708,19 @@ main() {
             ;;
         stats)
             show_cache_stats
+            ;;
+        install-man)
+            check_rust_toolchain
+            install_manpages
+            ;;
+        install-comp)
+            check_rust_toolchain
+            install_completions
+            ;;
+        install)
+            check_rust_toolchain
+            install_manpages
+            install_completions
             ;;
         help|-h|--help)
             show_help

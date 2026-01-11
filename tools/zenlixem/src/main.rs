@@ -1,9 +1,10 @@
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use serde::Serialize;
 use serde_json::json;
 use std::fs;
 use std::io;
+use std::path::Path;
 use std::process::Command;
 
 use cliutil::{
@@ -13,12 +14,26 @@ use cliutil::{
 use procscan::{list_pids, read_proc_net_sockets, ProcAccess};
 
 #[derive(Parser, Debug)]
-#[command(name = "zenlixem", disable_version_flag = true)]
+#[command(
+    name = "zenlixem",
+    disable_version_flag = true,
+    about = "Suite wrapper for zenlixem tools",
+    long_about = "zenlixem is a small, Linux-focused CLI suite for system introspection.\n\nThis binary provides suite-level metadata flags and the doctor and completions subcommands.",
+    after_help = r#"EXAMPLES:
+  zenlixem doctor
+  zenlixem doctor --json
+  zenlixem completions bash > zenlixem.bash
+"#
+)]
 struct Args {
-    #[arg(short = 'v', long = "version")]
+    #[arg(short = 'v', long = "version", help = "Print version information")]
     version: bool,
 
-    #[arg(short = 'i', long = "info")]
+    #[arg(
+        short = 'i',
+        long = "info",
+        help = "Show build and version information"
+    )]
     info: bool,
 
     #[command(subcommand)]
@@ -32,15 +47,36 @@ enum Cmd {
 }
 
 #[derive(Parser, Debug)]
+#[command(
+    about = "Run environment checks",
+    long_about = "Run environment checks (procfs visibility, /proc/net access, audit log, journalctl, build metadata).",
+    after_help = r#"EXAMPLES:
+  zenlixem doctor
+  zenlixem doctor --json
+"#
+)]
 struct DoctorArgs {
-    #[arg(long = "json")]
+    #[arg(long = "json", help = "Output result as JSON")]
     json: bool,
 }
 
 #[derive(Parser, Debug)]
+#[command(
+    about = "Print shell completion script",
+    long_about = "Print a shell completion script to stdout.\n\nIf SHELL is omitted, it is inferred from $SHELL.",
+    after_help = r#"EXAMPLES:
+  zenlixem completions bash > zenlixem.bash
+  zenlixem completions zsh > _zenlixem
+  zenlixem completions > _zenlixem
+"#
+)]
 struct CompletionsArgs {
-    #[arg(value_enum)]
-    shell: Shell,
+    #[arg(
+        value_enum,
+        value_name = "SHELL",
+        help = "Shell to generate completions for (bash|zsh|fish|powershell|elvish). If omitted, inferred from $SHELL."
+    )]
+    shell: Option<Shell>,
 }
 
 enum AppError {
@@ -76,10 +112,14 @@ fn main() {
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
+            if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+                let _ = e.print();
+                std::process::exit(0);
+            }
             if json_requested {
                 print_json_error(AppError::InvalidInput(e.to_string()));
             } else {
-                error(&e.to_string());
+                let _ = e.print();
             }
             std::process::exit(1);
         }
@@ -140,15 +180,45 @@ fn run(args: Args) -> Result<i32, AppError> {
     match cmd {
         Cmd::Doctor(d) => Ok(run_doctor(d.json)),
         Cmd::Completions(c) => {
-            run_completions(c.shell);
+            run_completions(c.shell)?;
             Ok(0)
         }
     }
 }
 
-fn run_completions(shell: Shell) {
+fn run_completions(shell: Option<Shell>) -> Result<(), AppError> {
+    let shell = match shell {
+        Some(s) => s,
+        None => detect_shell_from_env()?,
+    };
+
     let mut cmd = Args::command();
     generate(shell, &mut cmd, "zenlixem", &mut io::stdout());
+    Ok(())
+}
+
+fn detect_shell_from_env() -> Result<Shell, AppError> {
+    let shell = std::env::var("SHELL").map_err(|_| {
+        AppError::InvalidInput(
+            "cannot detect shell (SHELL is not set); try: zenlixem completions bash".to_string(),
+        )
+    })?;
+
+    let name = Path::new(&shell)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(shell.as_str());
+
+    match name {
+        "bash" => Ok(Shell::Bash),
+        "zsh" => Ok(Shell::Zsh),
+        "fish" => Ok(Shell::Fish),
+        "pwsh" | "powershell" => Ok(Shell::PowerShell),
+        "elvish" => Ok(Shell::Elvish),
+        _ => Err(AppError::InvalidInput(format!(
+            "cannot detect shell from SHELL={shell}; try: zenlixem completions bash",
+        ))),
+    }
 }
 
 fn run_doctor(json_out: bool) -> i32 {

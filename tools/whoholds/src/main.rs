@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{error::ErrorKind, Parser};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -17,27 +17,60 @@ use procscan::{
 const COMMAND_COL_WIDTH: usize = 16;
 
 #[derive(Parser, Debug)]
-#[command(name = "whoholds", disable_version_flag = true)]
+#[command(
+    name = "whoholds",
+    disable_version_flag = true,
+    about = "Show which processes hold a path or port",
+    long_about = "whoholds inspects procfs to report which processes hold a file/device path or a TCP/UDP port.\n\nWhen procfs access is restricted, results may be partial.",
+    after_help = r#"EXAMPLES:
+  whoholds /mnt/data
+  whoholds 8080
+  whoholds --ports --listening
+  whoholds --json 8080
+"#
+)]
 struct Args {
-    #[arg(short = 'v', long = "version")]
+    #[arg(short = 'v', long = "version", help = "Print version information")]
     version: bool,
 
-    #[arg(short = 'i', long = "info")]
+    #[arg(
+        short = 'i',
+        long = "info",
+        help = "Show build and version information"
+    )]
     info: bool,
 
-    #[arg(long = "json", conflicts_with_all = ["version", "info"])]
+    #[arg(
+        long = "json",
+        conflicts_with_all = ["version", "info"],
+        help = "Output result as JSON"
+    )]
     json: bool,
 
-    #[arg(long = "ports")]
+    #[arg(long = "ports", help = "Scan all ports")]
     ports: bool,
 
-    #[arg(long = "listening", requires = "ports", conflicts_with = "established")]
+    #[arg(
+        long = "listening",
+        requires = "ports",
+        conflicts_with = "established",
+        help = "Filter to listening sockets (used with --ports)"
+    )]
     listening: bool,
 
-    #[arg(long = "established", requires = "ports", conflicts_with = "listening")]
+    #[arg(
+        long = "established",
+        requires = "ports",
+        conflicts_with = "listening",
+        help = "Filter to established TCP sockets (used with --ports)"
+    )]
     established: bool,
 
-    #[arg(required_unless_present_any = ["version", "info", "ports"])]
+    #[arg(
+        value_name = "TARGET",
+        required_unless_present_any = ["version", "info", "ports"],
+        help = "File path or port number to inspect"
+    )]
     target: Option<String>,
 }
 
@@ -128,10 +161,14 @@ fn main() {
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
+            if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+                let _ = e.print();
+                std::process::exit(0);
+            }
             if json_requested {
                 print_json_error(AppError::InvalidInput(e.to_string()));
             } else {
-                error(&e.to_string());
+                let _ = e.print();
             }
             std::process::exit(1);
         }

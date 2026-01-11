@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{error::ErrorKind, Parser};
 use serde::Serialize;
 use serde_json::json;
 use std::env;
@@ -23,18 +23,39 @@ struct JsonError {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "envpath", disable_version_flag = true)]
+#[command(
+    name = "envpath",
+    disable_version_flag = true,
+    about = "Explain PATH resolution for a command",
+    long_about = "envpath shows which PATH entry selected the resolved executable for a bare command name.\n\nCOMMAND must be a bare command name (no '/' characters).",
+    after_help = r#"EXAMPLES:
+  envpath gcc
+  envpath --json gcc
+"#
+)]
 struct Args {
-    #[arg(short = 'v', long = "version")]
+    #[arg(short = 'v', long = "version", help = "Print version information")]
     version: bool,
 
-    #[arg(short = 'i', long = "info")]
+    #[arg(
+        short = 'i',
+        long = "info",
+        help = "Show build and version information"
+    )]
     info: bool,
 
-    #[arg(long = "json", conflicts_with_all = ["version", "info"])]
+    #[arg(
+        long = "json",
+        conflicts_with_all = ["version", "info"],
+        help = "Output result as JSON"
+    )]
     json: bool,
 
-    #[arg(required_unless_present_any = ["version", "info"])]
+    #[arg(
+        value_name = "COMMAND",
+        required_unless_present_any = ["version", "info"],
+        help = "Command name to resolve using $PATH"
+    )]
     command: Option<String>,
 }
 
@@ -57,10 +78,14 @@ fn main() {
     let args = match Args::try_parse() {
         Ok(a) => a,
         Err(e) => {
+            if matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+                let _ = e.print();
+                std::process::exit(0);
+            }
             if json_requested {
                 print_json_error(AppError::InvalidInput(e.to_string()));
             } else {
-                error(&e.to_string());
+                let _ = e.print();
             }
             std::process::exit(1);
         }

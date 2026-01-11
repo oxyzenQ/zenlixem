@@ -12,6 +12,12 @@ zenlixem is a small, Linux-focused CLI suite for system introspection.
 - `envpath` — why this command resolves to this path
 - `whyopen` — why this path / port is open (narrative reasons)
 
+## Project status (maintenance-grade)
+
+- Scope boundary: `FINAL.md`
+- Post-F checklist: `docs/post-f-checklist.md`
+- Performance notes: `docs/perf.md`
+
 ## Supported platforms
 
 Linux only.
@@ -103,13 +109,19 @@ chmod +x ./build.sh
 ### Shell completions (optional)
 
 ```bash
-zenlixem completions bash > zenlixem.bash
+./build.sh install-comp
 ```
 
 ### Manpages (optional)
 
 ```bash
-sudo install -Dm644 man/*.1 /usr/local/share/man/man1/
+sudo ./build.sh install-man
+```
+
+Or install both:
+
+```bash
+sudo ./build.sh install
 ```
 
 ### Optimized Linux targets
