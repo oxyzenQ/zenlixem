@@ -1,5 +1,6 @@
 use std::io::{self, IsTerminal, Write};
 
+const ANSI_DIM: &str = "\x1b[2m";
 const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
 const ANSI_RESET: &str = "\x1b[0m";
@@ -24,11 +25,20 @@ pub fn error(message: &str) {
     }
 }
 
-fn build_target() -> &'static str {
+pub fn print_header(message: &str) {
+    let mut stdout = io::stdout();
+    if stdout.is_terminal() {
+        let _ = writeln!(stdout, "{ANSI_DIM}{message}{ANSI_RESET}");
+    } else {
+        let _ = writeln!(stdout, "{message}");
+    }
+}
+
+pub fn build_target() -> &'static str {
     option_env!("ZENLIXEM_BUILD_TARGET").unwrap_or("unknown")
 }
 
-fn git_sha() -> &'static str {
+pub fn git_sha() -> &'static str {
     option_env!("ZENLIXEM_GIT_SHA").unwrap_or("unknown")
 }
 

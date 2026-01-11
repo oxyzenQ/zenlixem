@@ -6,6 +6,7 @@ zenlixem is a small, Linux-focused CLI suite for system introspection.
 
 ## Tools (v1.0.0)
 
+- `zenlixem` — suite wrapper (includes `zenlixem doctor`)
 - `whoholds` — who holds this file / device / port
 - `lasttouch` — who last modified this file
 - `envpath` — why this command resolves to this path
@@ -15,6 +16,22 @@ zenlixem is a small, Linux-focused CLI suite for system introspection.
 Linux only.
 
 ## Usage
+
+### `zenlixem`
+
+```bash
+zenlixem doctor
+```
+
+```bash
+zenlixem doctor --json
+```
+
+Exit codes:
+
+- `0` = OK
+- `1` = warnings
+- `2` = failures
 
 ### `whoholds`
 
@@ -81,6 +98,7 @@ Linux amd64 (universal):
 
 Outputs:
 
+- `target/x86_64-unknown-linux-gnu/release/zenlixem`
 - `target/x86_64-unknown-linux-gnu/release/whoholds`
 - `target/x86_64-unknown-linux-gnu/release/lasttouch`
 - `target/x86_64-unknown-linux-gnu/release/envpath`
@@ -93,6 +111,7 @@ Linux arm64 (universal):
 
 Outputs:
 
+- `target/aarch64-unknown-linux-gnu/release/zenlixem`
 - `target/aarch64-unknown-linux-gnu/release/whoholds`
 - `target/aarch64-unknown-linux-gnu/release/lasttouch`
 - `target/aarch64-unknown-linux-gnu/release/envpath`
@@ -102,6 +121,7 @@ Note: building for `aarch64-unknown-linux-gnu` typically requires building on an
 ### Build using Cargo (no script)
 
 ```bash
+cargo build --release -p zenlixem
 cargo build --release -p whoholds
 cargo build --release -p lasttouch
 cargo build --release -p envpath
@@ -110,6 +130,7 @@ cargo build --release -p envpath
 ### Run from source tree
 
 ```bash
+cargo run -p zenlixem -- doctor
 cargo run -p whoholds -- /mnt/data
 cargo run -p lasttouch -- /etc/sysctl.conf
 cargo run -p envpath -- gcc

@@ -1,14 +1,18 @@
 use clap::Parser;
+use serde::Serialize;
+use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use cliutil::{error, print_info, print_version};
+use cliutil::{error, print_header, print_info, print_version};
 use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
 use procscan::{
     list_pids, read_comm_access, read_fd_links_access, read_proc_maps_access,
     read_proc_net_sockets, ProcAccess, ProcNetProto,
 };
+
+const COMMAND_COL_WIDTH: usize = 16;
 
 #[derive(Parser, Debug)]
 #[command(name = "whoholds", disable_version_flag = true)]
@@ -18,6 +22,9 @@ struct Args {
 
     #[arg(short = 'i', long = "info")]
     info: bool,
+
+    #[arg(long = "json", conflicts_with_all = ["version", "info"])]
+    json: bool,
 
     #[arg(long = "ports")]
     ports: bool,
@@ -32,9 +39,72 @@ struct Args {
     target: Option<String>,
 }
 
+fn print_json_ports(
+    rows: Vec<PortRow>,
+    skipped_permission_denied: usize,
+    listening: bool,
+    established: bool,
+) {
+    let partial = skipped_permission_denied > 0;
+    let payload = json!({
+        "mode": "ports",
+        "listening": listening,
+        "established": established,
+        "partial": partial,
+        "skipped": skipped_permission_denied,
+        "results": rows,
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+    );
+}
+
+fn print_json_holders(
+    mode: &'static str,
+    target: String,
+    holders: BTreeMap<i32, Reason>,
+    skipped_permission_denied: usize,
+) {
+    let partial = skipped_permission_denied > 0;
+    let mut rows: Vec<HolderRow> = Vec::new();
+
+    for (pid, reason) in holders {
+        let comm = match read_comm_access(pid) {
+            ProcAccess::Ok(s) => s,
+            ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
+                "<unknown>".to_string()
+            }
+        };
+        rows.push(HolderRow {
+            pid,
+            command: comm,
+            reason: reason.as_str().to_string(),
+        });
+    }
+
+    let payload = json!({
+        "mode": mode,
+        "target": target,
+        "partial": partial,
+        "skipped": skipped_permission_denied,
+        "results": rows,
+    });
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+    );
+}
+
 enum AppError {
     InvalidInput(String),
     Fatal(String),
+}
+
+#[derive(Serialize)]
+struct JsonError {
+    kind: &'static str,
+    error: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -53,22 +123,56 @@ impl Reason {
 }
 
 fn main() {
-    match run() {
+    let json_requested = std::env::args().any(|a| a == "--json");
+
+    let args = match Args::try_parse() {
+        Ok(a) => a,
+        Err(e) => {
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e.to_string()));
+            } else {
+                error(&e.to_string());
+            }
+            std::process::exit(1);
+        }
+    };
+
+    match run(args) {
         Ok(()) => {}
         Err(AppError::InvalidInput(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(1);
         }
         Err(AppError::Fatal(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::Fatal(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(2);
         }
     }
 }
 
-fn run() -> Result<(), AppError> {
-    let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
+fn print_json_error(err: AppError) {
+    let (kind, msg) = match err {
+        AppError::InvalidInput(e) => ("invalid_input", e),
+        AppError::Fatal(e) => ("fatal", e),
+    };
+    let payload = JsonError { kind, error: msg };
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| {
+            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
+        })
+    );
+}
 
+fn run(args: Args) -> Result<(), AppError> {
     if args.version {
         print_version();
         return Ok(());
@@ -80,7 +184,7 @@ fn run() -> Result<(), AppError> {
     }
 
     if args.ports {
-        return whoholds_ports(args.listening, args.established);
+        return whoholds_ports(args.listening, args.established, args.json);
     }
 
     let target = args
@@ -88,24 +192,32 @@ fn run() -> Result<(), AppError> {
         .ok_or_else(|| AppError::InvalidInput("missing target".to_string()))?;
 
     if let Ok(port) = target.parse::<u16>() {
-        return whoholds_port(port);
+        return whoholds_port(port, args.json);
     }
 
     let path = PathBuf::from(&target);
-    whoholds_path(&path)
+    whoholds_path(&path, args.json)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct PortRow {
     port: u16,
     proto: &'static str,
+    #[serde(skip_serializing)]
     proto_sort: u8,
     pid: i32,
     command: String,
     state: String,
 }
 
-fn whoholds_ports(listening: bool, established: bool) -> Result<(), AppError> {
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct HolderRow {
+    pid: i32,
+    command: String,
+    reason: String,
+}
+
+fn whoholds_ports(listening: bool, established: bool, json_out: bool) -> Result<(), AppError> {
     let mut sockets = read_proc_net_sockets().map_err(|e| AppError::Fatal(e.to_string()))?;
 
     sockets.retain(|s| {
@@ -200,7 +312,16 @@ fn whoholds_ports(listening: bool, established: bool) -> Result<(), AppError> {
         a.port == b.port && a.proto_sort == b.proto_sort && a.pid == b.pid && a.state == b.state
     });
 
-    print_ports(rows, skipped_permission_denied.len());
+    if json_out {
+        print_json_ports(
+            rows,
+            skipped_permission_denied.len(),
+            listening,
+            established,
+        );
+    } else {
+        print_ports(rows, skipped_permission_denied.len());
+    }
     Ok(())
 }
 
@@ -231,7 +352,7 @@ fn socket_state_label(proto: ProcNetProto, state: u8) -> String {
     }
 }
 
-fn whoholds_path(path: &Path) -> Result<(), AppError> {
+fn whoholds_path(path: &Path, json_out: bool) -> Result<(), AppError> {
     let target_id = match file_id_for_path(path) {
         Ok(id) => id,
         Err(e) => {
@@ -290,11 +411,20 @@ fn whoholds_path(path: &Path) -> Result<(), AppError> {
         }
     }
 
-    print_holders(holders, skipped_permission_denied.len());
+    if json_out {
+        print_json_holders(
+            "path",
+            path.display().to_string(),
+            holders,
+            skipped_permission_denied.len(),
+        );
+    } else {
+        print_holders(holders, skipped_permission_denied.len());
+    }
     Ok(())
 }
 
-fn whoholds_port(port: u16) -> Result<(), AppError> {
+fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
     let sockets = read_proc_net_sockets().map_err(|e| AppError::Fatal(e.to_string()))?;
 
     let target_inodes: HashSet<u64> = sockets
@@ -307,7 +437,16 @@ fn whoholds_port(port: u16) -> Result<(), AppError> {
     let mut skipped_permission_denied: HashSet<i32> = HashSet::new();
 
     if target_inodes.is_empty() {
-        print_holders(holders, skipped_permission_denied.len());
+        if json_out {
+            print_json_holders(
+                "port",
+                port.to_string(),
+                holders,
+                skipped_permission_denied.len(),
+            );
+        } else {
+            print_holders(holders, skipped_permission_denied.len());
+        }
         return Ok(());
     }
 
@@ -329,7 +468,16 @@ fn whoholds_port(port: u16) -> Result<(), AppError> {
         }
     }
 
-    print_holders(holders, skipped_permission_denied.len());
+    if json_out {
+        print_json_holders(
+            "port",
+            port.to_string(),
+            holders,
+            skipped_permission_denied.len(),
+        );
+    } else {
+        print_holders(holders, skipped_permission_denied.len());
+    }
     Ok(())
 }
 
@@ -423,11 +571,24 @@ fn print_ports(rows: Vec<PortRow>, skipped_permission_denied: usize) {
         return;
     }
 
-    println!("PORT  PROTO PID   COMMAND     STATE");
+    print_header(&format!(
+        "{:<5} {:<5} {:<5} {:<width$} {}",
+        "PORT",
+        "PROTO",
+        "PID",
+        "COMMAND",
+        "STATE",
+        width = COMMAND_COL_WIDTH
+    ));
     for r in rows {
         println!(
-            "{:<5} {:<5} {:<5} {:<11} {}",
-            r.port, r.proto, r.pid, r.command, r.state
+            "{:<5} {:<5} {:<5} {:<width$} {}",
+            r.port,
+            r.proto,
+            r.pid,
+            r.command,
+            r.state,
+            width = COMMAND_COL_WIDTH
         );
     }
 }
@@ -444,8 +605,14 @@ fn print_holders(holders: BTreeMap<i32, Reason>, skipped_permission_denied: usiz
         return;
     }
 
-    println!("Held by:");
-    println!("PID   COMMAND     REASON");
+    print_header("Held by:");
+    print_header(&format!(
+        "{:<5} {:<width$} {}",
+        "PID",
+        "COMMAND",
+        "REASON",
+        width = COMMAND_COL_WIDTH
+    ));
 
     for (pid, reason) in holders {
         let comm = match read_comm_access(pid) {
@@ -454,6 +621,10 @@ fn print_holders(holders: BTreeMap<i32, Reason>, skipped_permission_denied: usiz
                 "<unknown>".to_string()
             }
         };
-        println!("{pid:<5} {comm:<11} {}", reason.as_str());
+        println!(
+            "{pid:<5} {comm:<width$} {}",
+            reason.as_str(),
+            width = COMMAND_COL_WIDTH
+        );
     }
 }

@@ -11,6 +11,8 @@ license.workspace = true
 
 [dependencies]
 clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 cliutil = { path = "../../crates/cliutil" }
 fsmeta = { path = "../../crates/fsmeta" }
 procscan = { path = "../../crates/procscan" }

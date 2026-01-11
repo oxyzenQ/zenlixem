@@ -1,15 +1,23 @@
 use clap::Parser;
+use serde::Serialize;
+use serde_json::json;
 use std::env;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use cliutil::{error, print_info, print_version, warn};
+use cliutil::{error, print_header, print_info, print_version, warn};
 
 enum AppError {
     InvalidInput(String),
     #[allow(dead_code)]
     Fatal(String),
+}
+
+#[derive(Serialize)]
+struct JsonError {
+    kind: &'static str,
+    error: String,
 }
 
 #[derive(Parser, Debug)]
@@ -20,6 +28,9 @@ struct Args {
 
     #[arg(short = 'i', long = "info")]
     info: bool,
+
+    #[arg(long = "json", conflicts_with_all = ["version", "info"])]
+    json: bool,
 
     #[arg(required_unless_present_any = ["version", "info"])]
     command: Option<String>,
@@ -39,22 +50,56 @@ fn is_executable(path: &Path) -> bool {
 }
 
 fn main() {
-    match run() {
+    let json_requested = std::env::args().any(|a| a == "--json");
+
+    let args = match Args::try_parse() {
+        Ok(a) => a,
+        Err(e) => {
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e.to_string()));
+            } else {
+                error(&e.to_string());
+            }
+            std::process::exit(1);
+        }
+    };
+
+    match run(args) {
         Ok(()) => {}
         Err(AppError::InvalidInput(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(1);
         }
         Err(AppError::Fatal(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::Fatal(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(2);
         }
     }
 }
 
-fn run() -> Result<(), AppError> {
-    let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
+fn print_json_error(err: AppError) {
+    let (kind, msg) = match err {
+        AppError::InvalidInput(e) => ("invalid_input", e),
+        AppError::Fatal(e) => ("fatal", e),
+    };
+    let payload = JsonError { kind, error: msg };
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| {
+            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
+        })
+    );
+}
 
+fn run(args: Args) -> Result<(), AppError> {
     if args.version {
         print_version();
         return Ok(());
@@ -102,29 +147,57 @@ fn run() -> Result<(), AppError> {
         }
     }
 
+    if resolved.is_none() {
+        return Err(AppError::InvalidInput(
+            "command not found in PATH".to_string(),
+        ));
+    }
+
+    if args.json {
+        let mut order: Vec<serde_json::Value> = Vec::new();
+        for (idx, dir) in path_entries.iter().enumerate() {
+            order.push(json!({
+                "index": idx + 1,
+                "dir": dir.display().to_string(),
+                "selected": Some(idx) == selected_index,
+            }));
+        }
+
+        let payload = json!({
+            "mode": "envpath",
+            "command": command,
+            "partial": false,
+            "skipped": 0,
+            "results": {
+                "resolved": resolved.as_ref().map(|p| p.display().to_string()),
+                "path_order": order,
+            }
+        });
+
+        println!(
+            "{}",
+            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+        );
+        return Ok(());
+    }
+
     println!("Command: {}", command);
     println!();
-    println!("Resolved to:");
+    print_header("Resolved to:");
     match &resolved {
         Some(p) => println!("{}", p.display()),
         None => println!("<not found>"),
     }
     println!();
-    println!("PATH order:");
+    print_header("PATH order:");
 
     for (idx, dir) in path_entries.iter().enumerate() {
         let n = idx + 1;
         if Some(idx) == selected_index {
-            println!("{n}. {}   ← selected", dir.display());
+            println!("{n}. {}   <- selected", dir.display());
         } else {
             println!("{n}. {}", dir.display());
         }
-    }
-
-    if resolved.is_none() {
-        return Err(AppError::InvalidInput(
-            "command not found in PATH".to_string(),
-        ));
     }
 
     Ok(())

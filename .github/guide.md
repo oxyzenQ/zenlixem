@@ -41,6 +41,7 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 **Artifacts**
 
 - For each target (matrix), the workflow builds and packages:
+  - `zenlixem`
   - `whoholds`
   - `lasttouch`
   - `envpath`

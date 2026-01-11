@@ -72,7 +72,7 @@ jobs:
           ZENLIXEM_BUILD_TARGET: ${{ matrix.profile }}
           ZENLIXEM_GIT_SHA: ${{ github.sha }}
         run: |
-          cross build --profile "${{ matrix.profile }}" --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath
+          cross build --profile "${{ matrix.profile }}" --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath -p zenlixem
 
       - name: Package tarball
         run: |
@@ -84,8 +84,9 @@ jobs:
           cp "target/${{ matrix.target }}/${{ matrix.profile }}/whoholds" "${dist_dir}/whoholds"
           cp "target/${{ matrix.target }}/${{ matrix.profile }}/lasttouch" "${dist_dir}/lasttouch"
           cp "target/${{ matrix.target }}/${{ matrix.profile }}/envpath" "${dist_dir}/envpath"
+          cp "target/${{ matrix.target }}/${{ matrix.profile }}/zenlixem" "${dist_dir}/zenlixem"
 
-          chmod +x "${dist_dir}/whoholds" "${dist_dir}/lasttouch" "${dist_dir}/envpath"
+          chmod +x "${dist_dir}/whoholds" "${dist_dir}/lasttouch" "${dist_dir}/envpath" "${dist_dir}/zenlixem"
 
           tarball="zenlixem-${{ matrix.label }}.tar.gz"
           tar -C "${dist_dir}" -czf "${tarball}" .

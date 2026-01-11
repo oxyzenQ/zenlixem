@@ -73,4 +73,4 @@ jobs:
           ZENLIXEM_BUILD_TARGET: ${{ matrix.label }}
           ZENLIXEM_GIT_SHA: ${{ github.sha }}
         run: |
-          cross build --release --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath
+          cross build --release --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath -p zenlixem

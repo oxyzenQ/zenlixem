@@ -1,4 +1,6 @@
 use clap::Parser;
+use serde::Serialize;
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead};
@@ -6,12 +8,18 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cliutil::{error, print_info as print_suite_info, print_version, warn};
+use cliutil::{error, print_header, print_info as print_suite_info, print_version, warn};
 use fsmeta::format_systemtime_ago;
 
 enum AppError {
     InvalidInput(String),
     Fatal(String),
+}
+
+#[derive(Serialize)]
+struct JsonError {
+    kind: &'static str,
+    error: String,
 }
 
 #[derive(Parser, Debug)]
@@ -22,6 +30,9 @@ struct Args {
 
     #[arg(short = 'i', long = "info")]
     info: bool,
+
+    #[arg(long = "json", conflicts_with_all = ["version", "info"])]
+    json: bool,
 
     #[arg(required_unless_present_any = ["version", "info"])]
     path: Option<String>,
@@ -37,22 +48,56 @@ struct TouchInfo {
 }
 
 fn main() {
-    match run() {
+    let json_requested = std::env::args().any(|a| a == "--json");
+
+    let args = match Args::try_parse() {
+        Ok(a) => a,
+        Err(e) => {
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e.to_string()));
+            } else {
+                error(&e.to_string());
+            }
+            std::process::exit(1);
+        }
+    };
+
+    match run(args) {
         Ok(()) => {}
         Err(AppError::InvalidInput(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::InvalidInput(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(1);
         }
         Err(AppError::Fatal(e)) => {
-            error(&e);
+            if json_requested {
+                print_json_error(AppError::Fatal(e));
+            } else {
+                error(&e);
+            }
             std::process::exit(2);
         }
     }
 }
 
-fn run() -> Result<(), AppError> {
-    let args = Args::try_parse().map_err(|e| AppError::InvalidInput(e.to_string()))?;
+fn print_json_error(err: AppError) {
+    let (kind, msg) = match err {
+        AppError::InvalidInput(e) => ("invalid_input", e),
+        AppError::Fatal(e) => ("fatal", e),
+    };
+    let payload = JsonError { kind, error: msg };
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| {
+            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
+        })
+    );
+}
 
+fn run(args: Args) -> Result<(), AppError> {
     if args.version {
         print_version();
         return Ok(());
@@ -87,31 +132,53 @@ fn run() -> Result<(), AppError> {
     };
     let mtime = md.modified().map_err(|e| AppError::Fatal(e.to_string()))?;
 
-    if let Some(info) = try_audit_log(&path).map_err(AppError::Fatal)? {
-        print_info(&info);
-        return Ok(());
-    }
-
-    if let Some(info) = try_journalctl(&path).map_err(AppError::Fatal)? {
-        print_info(&info);
-        return Ok(());
-    }
-
-    let info = TouchInfo {
-        user: "unknown".to_string(),
-        process: "unknown".to_string(),
-        time: mtime,
-        source: "metadata".to_string(),
-        metadata_only: true,
+    let info = if let Some(info) = try_audit_log(&path).map_err(AppError::Fatal)? {
+        info
+    } else if let Some(info) = try_journalctl(&path).map_err(AppError::Fatal)? {
+        info
+    } else {
+        TouchInfo {
+            user: "unknown".to_string(),
+            process: "unknown".to_string(),
+            time: mtime,
+            source: "metadata".to_string(),
+            metadata_only: true,
+        }
     };
 
-    print_info(&info);
+    if args.json {
+        let time_unix = info
+            .time
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
+        let payload = json!({
+            "mode": "lasttouch",
+            "path": path.display().to_string(),
+            "partial": info.metadata_only,
+            "skipped": 0,
+            "results": {
+                "user": info.user,
+                "process": info.process,
+                "time_unix": time_unix,
+                "source": info.source,
+                "metadata_only": info.metadata_only,
+            }
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+        );
+        return Ok(());
+    }
+
+    print_info(&info);
     Ok(())
 }
 
 fn print_info(info: &TouchInfo) {
-    println!("Last modified by:");
+    print_header("Last modified by:");
     println!("User: {}", info.user);
     println!("Process: {}", info.process);
     println!("Time: {}", format_systemtime_ago(info.time));
