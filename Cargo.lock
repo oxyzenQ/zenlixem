@@ -75,6 +75,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.5.65"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "430b4dc2b5e3861848de79627b2bedc9f3342c7da5173a14eaa5d0f8dc18ae5d"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.5.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -265,6 +274,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "whyopen"
+version = "1.0.0"
+dependencies = [
+ "clap",
+ "cliutil",
+ "fsmeta",
+ "procscan",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "windows-link"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -284,6 +305,7 @@ name = "zenlixem"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "cliutil",
  "procscan",
  "serde",

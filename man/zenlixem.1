@@ -1,0 +1,41 @@
+.TH ZENLIXEM 1 "January 2026" "zenlixem 1.0.0" "User Commands"
+.SH NAME
+zenlixem \- suite wrapper for zenlixem tools
+.SH SYNOPSIS
+.B zenlixem
+.RI [ OPTIONS ]
+.I COMMAND
+.RI [ ARGS ]
+.SH DESCRIPTION
+zenlixem is a small, Linux-focused CLI suite for system introspection.
+
+This binary provides suite-level metadata flags and the doctor subcommand.
+.SH OPTIONS
+.TP
+.BR \-v ,\ \-\-version
+Print version.
+.TP
+.BR \-i ,\ \-\-info
+Print build metadata.
+.SH COMMANDS
+.TP
+.B doctor
+Run environment checks (procfs visibility, /proc/net access, audit log, journalctl, build metadata).
+.TP
+.B completions
+Print shell completion script to stdout.
+.SH EXIT STATUS
+.TP
+.B 0
+All checks OK.
+.TP
+.B 1
+Warnings present.
+.TP
+.B 2
+Failures present.
+.SH SEE ALSO
+.BR whoholds (1),
+.BR lasttouch (1),
+.BR envpath (1),
+.BR whyopen (1)

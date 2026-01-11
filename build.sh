@@ -34,7 +34,7 @@ default_target() {
 TARGET="${ZENLIXEM_TARGET:-$(default_target)}"
 export RUST_BACKTRACE="${RUST_BACKTRACE:-1}"
 
-readonly TOOL_BINARIES=("whoholds" "lasttouch" "envpath")
+readonly TOOL_BINARIES=("zenlixem" "whoholds" "lasttouch" "envpath" "whyopen")
 
 # Intelligent job calculation: 75% of cores, min 1, max 8 for heat control
 calculate_jobs() {

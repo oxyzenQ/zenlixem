@@ -45,6 +45,7 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
   - `whoholds`
   - `lasttouch`
   - `envpath`
+  - `whyopen`
 
 Artifacts are uploaded as:
 

@@ -1,10 +1,15 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use serde::Serialize;
 use serde_json::json;
 use std::fs;
+use std::io;
 use std::process::Command;
 
-use cliutil::{build_target, error, git_sha, print_header, print_info, print_version};
+use cliutil::{
+    build_target, error, git_sha, print_header, print_info, print_version, privilege_mode,
+    privilege_mode_message,
+};
 use procscan::{list_pids, read_proc_net_sockets, ProcAccess};
 
 #[derive(Parser, Debug)]
@@ -23,12 +28,19 @@ struct Args {
 #[derive(Subcommand, Debug)]
 enum Cmd {
     Doctor(DoctorArgs),
+    Completions(CompletionsArgs),
 }
 
 #[derive(Parser, Debug)]
 struct DoctorArgs {
     #[arg(long = "json")]
     json: bool,
+}
+
+#[derive(Parser, Debug)]
+struct CompletionsArgs {
+    #[arg(value_enum)]
+    shell: Shell,
 }
 
 enum AppError {
@@ -121,13 +133,22 @@ fn run(args: Args) -> Result<i32, AppError> {
 
     let Some(cmd) = args.command else {
         return Err(AppError::InvalidInput(
-            "missing command (try: zenlixem doctor)".to_string(),
+            "missing command (try: zenlixem doctor | zenlixem completions bash)".to_string(),
         ));
     };
 
     match cmd {
         Cmd::Doctor(d) => Ok(run_doctor(d.json)),
+        Cmd::Completions(c) => {
+            run_completions(c.shell);
+            Ok(0)
+        }
     }
+}
+
+fn run_completions(shell: Shell) {
+    let mut cmd = Args::command();
+    generate(shell, &mut cmd, "zenlixem", &mut io::stdout());
 }
 
 fn run_doctor(json_out: bool) -> i32 {
@@ -155,6 +176,8 @@ fn run_doctor(json_out: bool) -> i32 {
 
     if json_out {
         let payload = json!({
+            "privilege": privilege_mode(),
+            "mode_message": privilege_mode_message(),
             "mode": "doctor",
             "build_target": build_target(),
             "git_sha": git_sha(),
@@ -169,6 +192,7 @@ fn run_doctor(json_out: bool) -> i32 {
     }
 
     print_header("Doctor report:");
+    println!("{}", privilege_mode_message());
     print_header("STATUS  CHECK                 MESSAGE");
 
     for c in &checks {

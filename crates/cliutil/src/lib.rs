@@ -1,5 +1,19 @@
 use std::io::{self, IsTerminal, Write};
 
+fn effective_uid() -> Option<u32> {
+    let s = std::fs::read_to_string("/proc/self/status").ok()?;
+    for line in s.lines() {
+        let Some(rest) = line.strip_prefix("Uid:") else {
+            continue;
+        };
+        let mut it = rest.split_whitespace();
+        let _real = it.next();
+        let effective = it.next()?;
+        return effective.parse::<u32>().ok();
+    }
+    None
+}
+
 const ANSI_DIM: &str = "\x1b[2m";
 const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
@@ -40,6 +54,21 @@ pub fn build_target() -> &'static str {
 
 pub fn git_sha() -> &'static str {
     option_env!("ZENLIXEM_GIT_SHA").unwrap_or("unknown")
+}
+
+pub fn privilege_mode() -> &'static str {
+    match effective_uid() {
+        Some(0) => "privileged",
+        _ => "unprivileged",
+    }
+}
+
+pub fn privilege_mode_message() -> &'static str {
+    if privilege_mode() == "privileged" {
+        "Mode: privileged (full scan)"
+    } else {
+        "Mode: unprivileged (partial results expected)"
+    }
 }
 
 fn short_sha(sha: &str) -> &str {

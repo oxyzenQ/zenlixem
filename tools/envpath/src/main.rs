@@ -6,7 +6,9 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use cliutil::{error, print_header, print_info, print_version, warn};
+use cliutil::{
+    error, print_header, print_info, print_version, privilege_mode, privilege_mode_message, warn,
+};
 
 enum AppError {
     InvalidInput(String),
@@ -164,6 +166,8 @@ fn run(args: Args) -> Result<(), AppError> {
         }
 
         let payload = json!({
+            "privilege": privilege_mode(),
+            "mode_message": privilege_mode_message(),
             "mode": "envpath",
             "command": command,
             "partial": false,
@@ -181,6 +185,7 @@ fn run(args: Args) -> Result<(), AppError> {
         return Ok(());
     }
 
+    println!("{}", privilege_mode_message());
     println!("Command: {}", command);
     println!();
     print_header("Resolved to:");

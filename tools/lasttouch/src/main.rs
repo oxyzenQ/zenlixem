@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use cliutil::{error, print_header, print_info as print_suite_info, print_version, warn};
+use cliutil::{
+    error, print_header, print_info as print_suite_info, print_version, privilege_mode,
+    privilege_mode_message, warn,
+};
 use fsmeta::format_systemtime_ago;
 
 enum AppError {
@@ -154,6 +157,8 @@ fn run(args: Args) -> Result<(), AppError> {
             .unwrap_or(0);
 
         let payload = json!({
+            "privilege": privilege_mode(),
+            "mode_message": privilege_mode_message(),
             "mode": "lasttouch",
             "path": path.display().to_string(),
             "partial": info.metadata_only,
@@ -178,6 +183,7 @@ fn run(args: Args) -> Result<(), AppError> {
 }
 
 fn print_info(info: &TouchInfo) {
+    println!("{}", privilege_mode_message());
     print_header("Last modified by:");
     println!("User: {}", info.user);
     println!("Process: {}", info.process);

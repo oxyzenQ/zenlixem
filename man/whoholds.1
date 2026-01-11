@@ -1,0 +1,42 @@
+.TH WHOHOLDS 1 "January 2026" "zenlixem 1.0.0" "User Commands"
+.SH NAME
+whoholds \- list processes holding a path or port
+.SH SYNOPSIS
+.B whoholds
+.RI [ OPTIONS ]
+.I TARGET
+.SH DESCRIPTION
+whoholds inspects procfs to report which processes hold a file/device or a TCP/UDP port.
+
+When procfs access is restricted, results may be partial.
+.SH OPTIONS
+.TP
+.BR \-v ,\ \-\-version
+Print version.
+.TP
+.BR \-i ,\ \-\-info
+Print build metadata.
+.TP
+.BR \-\-ports
+Scan all ports.
+.TP
+.BR \-\-listening
+Filter to listening sockets (used with \-\-ports).
+.TP
+.BR \-\-established
+Filter to established TCP sockets (used with \-\-ports).
+.TP
+.BR \-\-json
+Emit a single JSON object.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid input.
+.TP
+.B 2
+Fatal error.
+.SH SEE ALSO
+.BR zenlixem (1)

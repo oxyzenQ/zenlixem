@@ -1,5 +1,5 @@
 [package]
-name = "zenlixem"
+name = "whyopen"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -11,8 +11,8 @@ license.workspace = true
 
 [dependencies]
 clap.workspace = true
-clap_complete.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 cliutil = { path = "../../crates/cliutil" }
+fsmeta = { path = "../../crates/fsmeta" }
 procscan = { path = "../../crates/procscan" }

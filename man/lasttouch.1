@@ -1,0 +1,33 @@
+.TH LASTTOUCH 1 "January 2026" "zenlixem 1.0.0" "User Commands"
+.SH NAME
+lasttouch \- report who last modified a file
+.SH SYNOPSIS
+.B lasttouch
+.RI [ OPTIONS ]
+.I PATH
+.SH DESCRIPTION
+lasttouch reports who last modified a file. It prefers audit log or journalctl signals when available.
+
+When privileged sources are unavailable, it falls back to filesystem metadata.
+.SH OPTIONS
+.TP
+.BR \-v ,\ \-\-version
+Print version.
+.TP
+.BR \-i ,\ \-\-info
+Print build metadata.
+.TP
+.BR \-\-json
+Emit a single JSON object.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid input.
+.TP
+.B 2
+Fatal error.
+.SH SEE ALSO
+.BR zenlixem (1)

@@ -1,0 +1,35 @@
+.TH WHYOPEN 1 "January 2026" "zenlixem 1.0.0" "User Commands"
+.SH NAME
+whyopen \- explain why a path or port is open
+.SH SYNOPSIS
+.B whyopen
+.RI [ OPTIONS ]
+.I TARGET
+.SH DESCRIPTION
+whyopen produces a narrative summary of why a file path or port is open.
+
+For paths it reports evidence like open file descriptors and memory mappings.
+For ports it reports socket evidence derived from /proc/net and process fd links.
+.SH OPTIONS
+.TP
+.BR \-v ,\ \-\-version
+Print version.
+.TP
+.BR \-i ,\ \-\-info
+Print build metadata.
+.TP
+.BR \-\-json
+Emit a single JSON object.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid input.
+.TP
+.B 2
+Fatal error.
+.SH SEE ALSO
+.BR zenlixem (1),
+.BR whoholds (1)
