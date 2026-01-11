@@ -123,6 +123,10 @@ fn parse_hex_u16(s: &str) -> Option<u16> {
     u16::from_str_radix(s, 16).ok()
 }
 
+fn parse_hex_u8(s: &str) -> Option<u8> {
+    u8::from_str_radix(s, 16).ok()
+}
+
 pub fn parse_dev_hex(dev: &str) -> Option<(u32, u32)> {
     let mut it = dev.split(':');
     let major = parse_hex_u32(it.next()?)?;
@@ -233,6 +237,7 @@ pub struct ProcNetSocketEntry {
     pub proto: ProcNetProto,
     pub local_port: u16,
     pub inode: u64,
+    pub state: u8,
 }
 
 fn parse_proc_net_file(path: &Path, proto: ProcNetProto) -> io::Result<Vec<ProcNetSocketEntry>> {
@@ -252,9 +257,13 @@ fn parse_proc_net_file(path: &Path, proto: ProcNetProto) -> io::Result<Vec<ProcN
         let Some(local_address) = it.next() else {
             continue;
         };
+        let _rem_address = it.next();
+        let Some(state_hex) = it.next() else {
+            continue;
+        };
 
         let mut ok = true;
-        for _ in 0..7 {
+        for _ in 0..5 {
             if it.next().is_none() {
                 ok = false;
                 break;
@@ -276,6 +285,10 @@ fn parse_proc_net_file(path: &Path, proto: ProcNetProto) -> io::Result<Vec<ProcN
             continue;
         };
 
+        let Some(state) = parse_hex_u8(state_hex) else {
+            continue;
+        };
+
         let Ok(inode) = inode_field.parse::<u64>() else {
             continue;
         };
@@ -284,6 +297,7 @@ fn parse_proc_net_file(path: &Path, proto: ProcNetProto) -> io::Result<Vec<ProcN
             proto,
             local_port,
             inode,
+            state,
         });
     }
 
@@ -337,5 +351,28 @@ mod tests {
             ProcAccess::Gone => {}
             other => panic!("unexpected result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_proc_net_file_reads_state_and_inode() {
+        let path = std::env::temp_dir().join(format!(
+            "zenlixem_proc_net_test_{}_{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let contents = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 46743 2 0000000000000000 100 0 0 10 0\n";
+        fs::write(&path, contents).unwrap();
+
+        let v = parse_proc_net_file(&path, ProcNetProto::Tcp).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].local_port, 53);
+        assert_eq!(v[0].inode, 46743);
+        assert_eq!(v[0].state, 0x0A);
+
+        let _ = fs::remove_file(&path);
     }
 }
