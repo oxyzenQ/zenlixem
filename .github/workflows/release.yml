@@ -114,7 +114,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          if [[ "${tag}" == *-* ]]; then
+          if [[ "${tag}" == *-stable.* || "${tag}" == *-stable ]]; then
+            echo "prerelease=false" >> "${GITHUB_OUTPUT}"
+            echo "make_latest=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${tag}" == *-* ]]; then
             echo "prerelease=true" >> "${GITHUB_OUTPUT}"
             echo "make_latest=false" >> "${GITHUB_OUTPUT}"
           else
