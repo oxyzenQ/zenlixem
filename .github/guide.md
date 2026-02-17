@@ -6,12 +6,12 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 
 ### 1) CI (`.github/workflows/ci.yml`)
 
-**Triggers**
+#### Triggers
 
 - Push to `main`
 - Pull requests
 
-**Jobs**
+#### Jobs
 
 - `lint_test`
   - `cargo build --all-targets` (debug)
@@ -27,18 +27,18 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 
 ### 2) Release (`.github/workflows/release.yml`)
 
-**Trigger**
+#### Trigger
 
 - Push tags matching `v*`
 
-**Gate (must be green before publishing)**
+#### Gate (must be green before publishing)
 
 - `verify` job runs the same checks as CI:
   - `yamllint .github/workflows/*`
   - `actionlint .github/workflows/*`
   - `./build.sh check-all --verbose`
 
-**Artifacts**
+#### Artifacts
 
 - For each target (matrix), the workflow builds and packages:
   - `zenlixem`
