@@ -1,7 +1,5 @@
 # zenlixem
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/oxyzenQ/zenlixem)
-
 zenlixem is a small, Linux-focused CLI suite for system introspection.
 
 ## Tools (v1.0.1)

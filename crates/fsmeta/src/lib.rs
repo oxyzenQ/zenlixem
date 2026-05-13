@@ -1,3 +1,5 @@
+// Copyright (c) 2026 rezky_nightky
+
 use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;

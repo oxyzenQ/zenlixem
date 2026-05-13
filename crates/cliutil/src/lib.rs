@@ -1,3 +1,5 @@
+// Copyright (c) 2026 rezky_nightky
+
 use std::io::{self, IsTerminal, Write};
 
 use serde::Serialize;

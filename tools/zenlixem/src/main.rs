@@ -1,3 +1,5 @@
+// Copyright (c) 2026 rezky_nightky
+
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use serde::Serialize;

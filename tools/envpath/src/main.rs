@@ -1,3 +1,5 @@
+// Copyright (c) 2026 rezky_nightky
+
 use clap::{error::ErrorKind, Parser};
 use serde_json::json;
 use std::env;
