@@ -28,12 +28,17 @@ pub fn print_json_error(err: AppError) {
         AppError::Fatal(e) => ("fatal", e),
     };
     let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
+    print_json_payload(&payload);
+}
+
+/// Serialize a value as JSON and print to stdout.
+///
+/// On serialization failure, prints a fallback error JSON object
+/// instead of silently emitting `{}`.
+pub fn print_json_payload<T: Serialize>(value: &T) {
+    let json = serde_json::to_string(value)
+        .unwrap_or_else(|_| r#"{"kind":"fatal","error":"json serialization failed"}"#.to_string());
+    println!("{json}");
 }
 
 fn effective_uid() -> Option<u32> {

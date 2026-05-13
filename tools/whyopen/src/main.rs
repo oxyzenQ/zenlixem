@@ -5,12 +5,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_json_error, print_version, privilege_mode,
-    privilege_mode_message, AppError,
+    error, print_header, print_info, print_json_error, print_json_payload, print_version,
+    privilege_mode, privilege_mode_message, AppError,
 };
 use fsmeta::{dev_major_minor, file_id_for_path};
 use procscan::{
-    list_pids, parse_socket_inode, proto_label, read_comm_access, read_fd_links_access,
+    list_pids, parse_socket_inode, proto_label, read_comm_best_effort, read_fd_links_access,
     read_proc_net_sockets, scan_pid_mmap_file, scan_pid_open_fd_file, socket_state_label,
     ProcAccess,
 };
@@ -60,15 +60,6 @@ struct ProcResult {
     pid: i32,
     command: String,
     reasons: Vec<String>,
-}
-
-fn read_comm_best_effort(pid: i32) -> String {
-    match read_comm_access(pid) {
-        ProcAccess::Ok(s) => s,
-        ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
-            "<unknown>".to_string()
-        }
-    }
 }
 
 fn main() {
@@ -392,8 +383,31 @@ fn print_json(
         "results": rows,
     });
 
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-    );
+    print_json_payload(&payload);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proc_result_serializes_json() {
+        let result = ProcResult {
+            pid: 1234,
+            command: "myapp".to_string(),
+            reasons: vec!["open fd".to_string(), "memory mapped".to_string()],
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["pid"], 1234);
+        assert_eq!(json["command"], "myapp");
+        assert_eq!(json["reasons"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn reasons_dedup_sort() {
+        let mut reasons = vec!["memory mapped".to_string(), "open fd".to_string()];
+        reasons.sort();
+        reasons.dedup();
+        assert_eq!(reasons, vec!["memory mapped", "open fd"]);
+    }
 }

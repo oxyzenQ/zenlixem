@@ -5,14 +5,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_json_error, print_version, privilege_mode,
-    privilege_mode_message, AppError,
+    error, print_header, print_info, print_json_error, print_json_payload, print_version,
+    privilege_mode, privilege_mode_message, AppError,
 };
 use fsmeta::{dev_major_minor, file_id_for_path};
 use procscan::{
-    list_pids, parse_socket_inode, proto_label_and_sort, read_comm_access, read_fd_links_access,
-    read_proc_net_sockets, scan_pid_mmap_file, scan_pid_open_fd_file, socket_state_label,
-    ProcAccess, ProcNetProto, TCP_ESTABLISHED, TCP_LISTEN, UDP_LISTEN,
+    list_pids, parse_socket_inode, proto_label_and_sort, read_comm_access, read_comm_best_effort,
+    read_fd_links_access, read_proc_net_sockets, scan_pid_mmap_file, scan_pid_open_fd_file,
+    scan_pid_open_fd_socket, socket_state_label, ProcAccess, ProcNetProto, TCP_ESTABLISHED,
+    TCP_LISTEN, UDP_LISTEN,
 };
 
 const COMMAND_COL_WIDTH: usize = 16;
@@ -92,10 +93,7 @@ fn print_json_ports(
         "skipped": skipped_permission_denied,
         "results": rows,
     });
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-    );
+    print_json_payload(&payload);
 }
 
 fn print_json_holders(
@@ -129,10 +127,7 @@ fn print_json_holders(
         "skipped": skipped_permission_denied,
         "results": rows,
     });
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-    );
+    print_json_payload(&payload);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -495,27 +490,6 @@ fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
     Ok(())
 }
 
-fn scan_pid_open_fd_socket(pid: i32, inodes: &HashSet<u64>) -> ProcAccess<bool> {
-    let links = match read_fd_links_access(pid) {
-        ProcAccess::Ok(v) => v,
-        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
-        ProcAccess::Gone => return ProcAccess::Gone,
-        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
-    };
-
-    for (_fd, _fd_path, link) in links {
-        let Some(inode) = parse_socket_inode(&link) else {
-            continue;
-        };
-
-        if inodes.contains(&inode) {
-            return ProcAccess::Ok(true);
-        }
-    }
-
-    ProcAccess::Ok(false)
-}
-
 fn print_ports(rows: Vec<PortRow>, skipped_permission_denied: usize) {
     println!("{}", privilege_mode_message());
     if skipped_permission_denied > 0 {
@@ -551,15 +525,6 @@ fn print_ports(rows: Vec<PortRow>, skipped_permission_denied: usize) {
     }
 }
 
-fn read_comm_best_effort(pid: i32) -> String {
-    match read_comm_access(pid) {
-        ProcAccess::Ok(s) => s,
-        ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
-            "<unknown>".to_string()
-        }
-    }
-}
-
 fn print_holders(holders: BTreeMap<i32, (Vec<Reason>, String)>, skipped_permission_denied: usize) {
     println!("{}", privilege_mode_message());
     if skipped_permission_denied > 0 {
@@ -592,5 +557,64 @@ fn print_holders(holders: BTreeMap<i32, (Vec<Reason>, String)>, skipped_permissi
             "{pid:<5} {comm:<width$} {reason_str}",
             width = COMMAND_COL_WIDTH
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reason_as_str() {
+        assert_eq!(Reason::OpenFd.as_str(), "open fd");
+        assert_eq!(Reason::Mmap.as_str(), "mmap");
+    }
+
+    #[test]
+    fn reason_ordering() {
+        assert!(Reason::Mmap > Reason::OpenFd);
+    }
+
+    #[test]
+    fn holder_row_serializes_json() {
+        let row = HolderRow {
+            pid: 1234,
+            command: "bash".to_string(),
+            reason: "open fd".to_string(),
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["pid"], 1234);
+        assert_eq!(json["command"], "bash");
+        assert_eq!(json["reason"], "open fd");
+    }
+
+    #[test]
+    fn port_row_serializes_json() {
+        let row = PortRow {
+            port: 8080,
+            proto: "tcp",
+            proto_sort: 0,
+            pid: 42,
+            command: "nginx".to_string(),
+            state: "listening".to_string(),
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["port"], 8080);
+        assert_eq!(json["proto"], "tcp");
+        assert_eq!(json["pid"], 42);
+        assert_eq!(json["command"], "nginx");
+        assert_eq!(json["state"], "listening");
+        // proto_sort should be skipped
+        assert!(json.get("proto_sort").is_none());
+    }
+
+    #[test]
+    fn target_parse_port() {
+        assert!("8080".parse::<u16>().is_ok());
+        assert!("0".parse::<u16>().is_ok());
+        assert!("65535".parse::<u16>().is_ok());
+        assert!("65536".parse::<u16>().is_err());
+        assert!("-1".parse::<u16>().is_err());
+        assert!("abc".parse::<u16>().is_err());
     }
 }

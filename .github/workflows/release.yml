@@ -34,6 +34,16 @@ jobs:
       - name: actionlint
         uses: devops-actions/actionlint@e7ee33fbf5aa8c9f9ee1145137f3e52e25d6a35b
 
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
       - name: build.sh check-all
         run: bash ./build.sh check-all --verbose
 

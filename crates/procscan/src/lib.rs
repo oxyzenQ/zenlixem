@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
@@ -430,6 +431,37 @@ pub fn socket_state_label(proto: ProcNetProto, state: u8) -> String {
     }
 }
 
+pub fn scan_pid_open_fd_socket(pid: i32, inodes: &HashSet<u64>) -> ProcAccess<bool> {
+    let links = match read_fd_links_access(pid) {
+        ProcAccess::Ok(v) => v,
+        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
+        ProcAccess::Gone => return ProcAccess::Gone,
+        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
+    };
+
+    for (_fd, _fd_path, link) in links {
+        let Some(inode) = parse_socket_inode(&link) else {
+            continue;
+        };
+
+        if inodes.contains(&inode) {
+            return ProcAccess::Ok(true);
+        }
+    }
+
+    ProcAccess::Ok(false)
+}
+
+/// Read /proc/<pid>/comm, returning "<unknown>" on any failure.
+pub fn read_comm_best_effort(pid: i32) -> String {
+    match read_comm_access(pid) {
+        ProcAccess::Ok(s) => s,
+        ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
+            "<unknown>".to_string()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,6 +474,11 @@ mod tests {
     #[test]
     fn parse_dev_hex_bad() {
         assert_eq!(parse_dev_hex("zz:01"), None);
+    }
+
+    #[test]
+    fn parse_dev_hex_missing_minor() {
+        assert_eq!(parse_dev_hex("08"), None);
     }
 
     #[test]
@@ -458,6 +495,96 @@ mod tests {
             ProcAccess::Gone => {}
             other => panic!("unexpected result: {other:?}"),
         }
+    }
+
+    #[test]
+    fn read_comm_best_effort_on_nonexistent_pid() {
+        assert_eq!(read_comm_best_effort(-1), "<unknown>");
+    }
+
+    #[test]
+    fn parse_socket_inode_valid() {
+        assert_eq!(parse_socket_inode("socket:[12345]"), Some(12345));
+        assert_eq!(parse_socket_inode("socket:[0]"), Some(0));
+    }
+
+    #[test]
+    fn parse_socket_inode_missing_prefix() {
+        assert_eq!(parse_socket_inode("[12345]"), None);
+        assert_eq!(parse_socket_inode("socket:12345]"), None);
+    }
+
+    #[test]
+    fn parse_socket_inode_missing_suffix() {
+        assert_eq!(parse_socket_inode("socket:[12345"), None);
+    }
+
+    #[test]
+    fn parse_socket_inode_non_numeric() {
+        assert_eq!(parse_socket_inode("socket:[abc]"), None);
+    }
+
+    #[test]
+    fn parse_socket_inode_empty() {
+        assert_eq!(parse_socket_inode(""), None);
+    }
+
+    #[test]
+    fn proto_label_tcp() {
+        assert_eq!(proto_label(ProcNetProto::Tcp), "tcp");
+        assert_eq!(proto_label(ProcNetProto::Tcp6), "tcp");
+    }
+
+    #[test]
+    fn proto_label_udp() {
+        assert_eq!(proto_label(ProcNetProto::Udp), "udp");
+        assert_eq!(proto_label(ProcNetProto::Udp6), "udp");
+    }
+
+    #[test]
+    fn proto_label_and_sort_tcp() {
+        assert_eq!(proto_label_and_sort(ProcNetProto::Tcp), ("tcp", 0));
+        assert_eq!(proto_label_and_sort(ProcNetProto::Tcp6), ("tcp", 0));
+    }
+
+    #[test]
+    fn proto_label_and_sort_udp() {
+        assert_eq!(proto_label_and_sort(ProcNetProto::Udp), ("udp", 1));
+        assert_eq!(proto_label_and_sort(ProcNetProto::Udp6), ("udp", 1));
+    }
+
+    #[test]
+    fn socket_state_label_tcp_established() {
+        assert_eq!(
+            socket_state_label(ProcNetProto::Tcp, TCP_ESTABLISHED),
+            "established"
+        );
+    }
+
+    #[test]
+    fn socket_state_label_tcp_listen() {
+        assert_eq!(
+            socket_state_label(ProcNetProto::Tcp, TCP_LISTEN),
+            "listening"
+        );
+    }
+
+    #[test]
+    fn socket_state_label_tcp_unknown() {
+        assert_eq!(socket_state_label(ProcNetProto::Tcp, 0x06), "0x06");
+    }
+
+    #[test]
+    fn socket_state_label_udp_listen() {
+        assert_eq!(
+            socket_state_label(ProcNetProto::Udp, UDP_LISTEN),
+            "listening"
+        );
+    }
+
+    #[test]
+    fn socket_state_label_udp_unknown() {
+        assert_eq!(socket_state_label(ProcNetProto::Udp, 0x01), "0x01");
     }
 
     #[test]
@@ -481,5 +608,41 @@ mod tests {
         assert_eq!(v[0].state, 0x0A);
 
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parse_proc_net_file_empty() {
+        let path = std::env::temp_dir().join(format!(
+            "zenlixem_proc_net_empty_{}_{}.txt",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let contents = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
+        fs::write(&path, contents).unwrap();
+
+        let v = parse_proc_net_file(&path, ProcNetProto::Tcp).unwrap();
+        assert!(v.is_empty());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn fd_dir_format() {
+        assert_eq!(fd_dir(1234), PathBuf::from("/proc/1234/fd"));
+    }
+
+    #[test]
+    fn list_pids_returns_sorted() {
+        // On any Linux system, PID 1 should exist
+        let pids = list_pids().expect("should be able to list /proc");
+        assert!(!pids.is_empty());
+        // Verify sorted
+        for window in pids.windows(2) {
+            assert!(window[0] <= window[1], "PIDs should be sorted");
+        }
     }
 }

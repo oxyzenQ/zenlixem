@@ -39,6 +39,11 @@ jobs:
         with:
           tool: cargo-audit
 
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
       - name: build.sh check-all
         run: bash ./build.sh check-all --verbose
 

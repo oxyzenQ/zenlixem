@@ -8,8 +8,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_json_error, print_version, privilege_mode,
-    privilege_mode_message, AppError,
+    error, print_header, print_info, print_json_error, print_json_payload, print_version,
+    privilege_mode, privilege_mode_message, AppError,
 };
 
 #[derive(Parser, Debug)]
@@ -178,10 +178,7 @@ fn run(args: Args) -> Result<(), AppError> {
             }
         });
 
-        println!(
-            "{}",
-            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-        );
+        print_json_payload(&payload);
         return Ok(());
     }
 

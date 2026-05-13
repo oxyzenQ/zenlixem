@@ -20,6 +20,11 @@ Print build and version information.
 .TP
 .BR \-\-json
 Emit a single JSON object.
+.SH LIMITATIONS
+.TP
+Results depend on procfs permissions. Unprivileged users will see partial results when \fB/proc/<pid>/fd\fR is inaccessible.
+.TP
+Running inside a container limits visibility to the container's PID and network namespaces.
 .SH EXIT STATUS
 .TP
 .B 0

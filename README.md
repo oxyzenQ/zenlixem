@@ -213,3 +213,11 @@ All tools support:
 ## Notes
 
 - Some information sources may require elevated permissions. When a process cannot be inspected due to permissions, the tools will emit warnings.
+
+## Limitations
+
+- **lasttouch** cannot always determine the real actor who modified a file. When audit log and journalctl data are unavailable, it falls back to filesystem metadata (mtime), which provides a timestamp but no identity information. Metadata fallback is not proof of who made the change.
+- **whoholds** and **whyopen** rely on procfs scanning. Results depend on the caller's permissions: unprivileged users will see partial results when `/proc/<pid>/fd` or `/proc/<pid>/maps` is inaccessible. Systems with `hidepid=2` mounted on `/proc` will restrict most PID information from unprivileged users.
+- **Containers and namespaces**: when running inside a container, `/proc` shows only the container's PID namespace. whoholds/whyopen will not see host processes or sockets outside the container's network namespace.
+- **Audit log parsing** only covers x86_64 and aarch64 syscall tables. On other Linux architectures, lasttouch will fall back to the x86_64 table with a warning, which may misclassify events.
+- **Race conditions**: processes may exit or be recycled between the time their PID is enumerated and their fd/maps are read. The tools tolerate vanished PIDs gracefully but may miss short-lived processes.

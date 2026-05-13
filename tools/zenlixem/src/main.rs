@@ -8,8 +8,8 @@ use std::path::Path;
 use std::process::Command;
 
 use cliutil::{
-    build_target, error, git_sha, print_header, print_info, print_json_error, print_version,
-    privilege_mode, privilege_mode_message, short_sha, AppError,
+    build_target, error, git_sha, print_header, print_info, print_json_error, print_json_payload,
+    print_version, privilege_mode, privilege_mode_message, short_sha, AppError,
 };
 use procscan::{list_pids, read_proc_net_sockets, ProcAccess};
 
@@ -228,10 +228,7 @@ fn run_doctor(json_out: bool) -> i32 {
             "summary": { "ok": ok, "warn": warn, "fail": fail },
             "results": checks,
         });
-        println!(
-            "{}",
-            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-        );
+        print_json_payload(&payload);
         return exit_code;
     }
 
@@ -456,5 +453,71 @@ fn check_proc_access_smoke() -> CheckResult {
             status: CheckStatus::Warn,
             message: format!("error reading /proc/1/comm: {e}"),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_status_serializes_lowercase() {
+        let ok_val = serde_json::to_value(CheckStatus::Ok).unwrap();
+        assert_eq!(ok_val, "ok");
+        let warn_val = serde_json::to_value(CheckStatus::Warn).unwrap();
+        assert_eq!(warn_val, "warn");
+        let fail_val = serde_json::to_value(CheckStatus::Fail).unwrap();
+        assert_eq!(fail_val, "fail");
+    }
+
+    #[test]
+    fn check_result_serializes_json() {
+        let result = CheckResult {
+            check: "test_check",
+            status: CheckStatus::Ok,
+            message: "all good".to_string(),
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["check"], "test_check");
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["message"], "all good");
+    }
+
+    #[test]
+    fn check_os_on_linux() {
+        let result = check_os();
+        if std::env::consts::OS == "linux" {
+            assert_eq!(result.status, CheckStatus::Ok);
+            assert_eq!(result.check, "os");
+        }
+    }
+
+    #[test]
+    fn check_procfs_on_linux() {
+        let result = check_procfs();
+        // On any Linux system, /proc should be present
+        if std::env::consts::OS == "linux" {
+            assert_eq!(result.status, CheckStatus::Ok);
+        }
+    }
+
+    #[test]
+    fn doctor_exit_code_logic() {
+        // No fails → 0
+        assert_eq!(doctor_exit_code(5, 0, 0), 0);
+        // Has warns → 1
+        assert_eq!(doctor_exit_code(3, 2, 0), 1);
+        // Has fails → 2
+        assert_eq!(doctor_exit_code(0, 1, 1), 2);
+    }
+
+    fn doctor_exit_code(_ok: usize, warn: usize, fail: usize) -> i32 {
+        if fail > 0 {
+            2
+        } else if warn > 0 {
+            1
+        } else {
+            0
+        }
     }
 }

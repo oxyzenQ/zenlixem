@@ -8,8 +8,8 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cliutil::{
-    error, print_header, print_info as print_suite_info, print_json_error, print_version,
-    privilege_mode, privilege_mode_message, warn, AppError,
+    error, print_header, print_info as print_suite_info, print_json_error, print_json_payload,
+    print_version, privilege_mode, privilege_mode_message, warn, AppError,
 };
 use fsmeta::format_systemtime_ago;
 
@@ -171,10 +171,7 @@ fn run(args: Args) -> Result<(), AppError> {
                 "metadata_only": info.metadata_only,
             }
         });
-        println!(
-            "{}",
-            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-        );
+        print_json_payload(&payload);
         return Ok(());
     }
 
@@ -311,6 +308,10 @@ fn try_audit_log(path: &Path, passwd: &HashMap<u32, String>) -> Result<Option<To
                                 None => true,
                             };
                             if update {
+                                // Evict completed events older than the new best match
+                                if let Some((old_sec, _)) = &last_match {
+                                    events.retain(|_, ev| ev.sec == 0 || ev.sec >= *old_sec);
+                                }
                                 last_match = Some((sec, msg_id.clone()));
                             }
                         }
@@ -329,7 +330,11 @@ fn try_audit_log(path: &Path, passwd: &HashMap<u32, String>) -> Result<Option<To
     };
 
     let uid = ev.uid.unwrap_or(0);
-    let user = uid_to_user(uid, passwd);
+    let user = if ev.uid.is_some() {
+        uid_to_user(uid, passwd)
+    } else {
+        "unknown".to_string()
+    };
     let process = ev.comm.clone().unwrap_or_else(|| "unknown".to_string());
     let time = UNIX_EPOCH + Duration::from_secs(sec);
 
@@ -401,8 +406,13 @@ fn audit_event_is_modification(syscall: u64, a1: Option<u64>, a2: Option<u64>) -
             MODIFY_SYSCALLS_AARCH64.contains(&syscall)
         }
         _ => {
-            // Unknown architecture: fall back to x86_64 table
-            // so that existing behaviour is preserved on untested arches.
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                warn(&format!(
+                    "unknown architecture '{}': audit syscall classification uses x86_64 table (results may be inaccurate)",
+                    arch
+                ));
+            });
             if syscall == SYSCALL_OPEN_X86_64 {
                 return open_flags_modify(a1.unwrap_or(0));
             }
@@ -495,7 +505,12 @@ fn try_journalctl(path: &Path, passwd: &HashMap<u32, String>) -> Result<Option<T
         return Ok(None);
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout_raw = &output.stdout;
+    let has_replacement = String::from_utf8_lossy(stdout_raw).contains('\u{FFFD}');
+    let stdout = String::from_utf8_lossy(stdout_raw);
+    if has_replacement {
+        warn("journalctl output contained non-UTF-8 bytes; some fields may be inaccurate");
+    }
     if stdout.trim().is_empty() {
         return Ok(None);
     }

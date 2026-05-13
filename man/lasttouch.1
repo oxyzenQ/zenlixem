@@ -19,6 +19,13 @@ Print build and version information.
 .TP
 .BR \-\-json
 Emit a single JSON object.
+.SH LIMITATIONS
+.TP
+When audit log and journalctl data are unavailable, lasttouch falls back to filesystem metadata (mtime), which provides a timestamp but no identity information.
+.TP
+Metadata fallback is not proof of who modified the file.
+.TP
+Audit log parsing only covers x86_64 and aarch64 syscall tables.
 .SH EXIT STATUS
 .TP
 .B 0
