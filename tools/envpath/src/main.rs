@@ -1,13 +1,15 @@
 use clap::{error::ErrorKind, Parser};
 use serde_json::json;
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
     error, print_header, print_info, print_json_error, print_version, privilege_mode,
-    privilege_mode_message, warn, AppError,
+    privilege_mode_message, AppError,
 };
 
 #[derive(Parser, Debug)]
@@ -122,18 +124,17 @@ fn run(args: Args) -> Result<(), AppError> {
     }
 
     let path_var = env::var_os("PATH").unwrap_or_default();
-    let path_str = path_var.to_string_lossy();
 
     let mut path_entries: Vec<PathBuf> = Vec::new();
-    for part in path_str.split(':') {
+    for part in path_var.as_bytes().split(|&b| b == b':') {
         if part.is_empty() {
             continue;
         }
-        path_entries.push(PathBuf::from(part));
+        path_entries.push(PathBuf::from(OsStr::from_bytes(part)));
     }
 
     if path_entries.is_empty() {
-        warn("PATH is empty");
+        return Err(AppError::Fatal("PATH is empty or unset".to_string()));
     }
 
     let mut resolved: Option<PathBuf> = None;
@@ -205,4 +206,39 @@ fn run(args: Args) -> Result<(), AppError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_executable_on_known_binary() {
+        // /bin/sh is always present and executable on Linux
+        assert!(is_executable(Path::new("/bin/sh")));
+    }
+
+    #[test]
+    fn is_executable_on_nonexistent() {
+        assert!(!is_executable(Path::new("/nonexistent/path/bin")));
+    }
+
+    #[test]
+    fn is_executable_on_directory() {
+        // Directories are not executable files
+        assert!(!is_executable(Path::new("/tmp")));
+    }
+
+    #[test]
+    fn path_splitting_handles_empty() {
+        // Empty PATH bytes should produce no entries
+        let empty = std::ffi::OsString::new();
+        let entries: Vec<PathBuf> = empty
+            .as_bytes()
+            .split(|&b| b == b':')
+            .filter(|p| !p.is_empty())
+            .map(|p| PathBuf::from(OsStr::from_bytes(p)))
+            .collect();
+        assert!(entries.is_empty());
+    }
 }

@@ -2,6 +2,8 @@ use std::fs;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
+use fsmeta::{file_id_for_metadata, FileId};
+
 #[derive(Debug)]
 pub enum ProcAccess<T> {
     Ok(T),
@@ -42,6 +44,7 @@ pub fn list_pids() -> io::Result<Vec<i32>> {
     Ok(pids)
 }
 
+#[deprecated(note = "use read_comm_access instead for proper permission handling")]
 pub fn read_comm(pid: i32) -> io::Result<String> {
     let path = format!("/proc/{pid}/comm");
     let contents = fs::read_to_string(path)?;
@@ -61,6 +64,7 @@ pub fn fd_dir(pid: i32) -> PathBuf {
     PathBuf::from(format!("/proc/{pid}/fd"))
 }
 
+#[deprecated(note = "use read_fd_links_access instead for proper permission handling")]
 pub fn read_fd_links(pid: i32) -> io::Result<Vec<(i32, PathBuf, String)>> {
     let dir = fd_dir(pid);
     let mut out = Vec::new();
@@ -134,6 +138,7 @@ pub fn parse_dev_hex(dev: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
+#[deprecated(note = "use read_proc_maps_access instead for proper permission handling")]
 pub fn read_proc_maps(pid: i32) -> io::Result<Vec<ProcMapEntry>> {
     let path = format!("/proc/{pid}/maps");
     let f = fs::File::open(path)?;
@@ -321,6 +326,108 @@ pub fn read_proc_net_sockets() -> io::Result<Vec<ProcNetSocketEntry>> {
     }
 
     Ok(out)
+}
+
+// --- Named constants for socket states ---
+
+/// TCP socket states (Linux kernel)
+pub const TCP_ESTABLISHED: u8 = 0x01;
+pub const TCP_LISTEN: u8 = 0x0A;
+
+/// UDP socket states (Linux kernel)
+pub const UDP_LISTEN: u8 = 0x07;
+
+// --- Shared scanning functions ---
+
+pub fn scan_pid_open_fd_file(pid: i32, target: FileId) -> ProcAccess<bool> {
+    let links = match read_fd_links_access(pid) {
+        ProcAccess::Ok(v) => v,
+        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
+        ProcAccess::Gone => return ProcAccess::Gone,
+        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
+    };
+
+    for (_fd, fd_path, _link) in links {
+        let md = match fs::metadata(&fd_path) {
+            Ok(md) => md,
+            Err(_) => continue,
+        };
+
+        if file_id_for_metadata(&md) == target {
+            return ProcAccess::Ok(true);
+        }
+    }
+
+    ProcAccess::Ok(false)
+}
+
+pub fn scan_pid_mmap_file(
+    pid: i32,
+    target_major: u32,
+    target_minor: u32,
+    target_inode: u64,
+) -> ProcAccess<bool> {
+    let maps = match read_proc_maps_access(pid) {
+        ProcAccess::Ok(v) => v,
+        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
+        ProcAccess::Gone => return ProcAccess::Gone,
+        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
+    };
+
+    for entry in maps {
+        if entry.inode == 0 {
+            continue;
+        }
+
+        if entry.inode == target_inode
+            && entry.dev_major == target_major
+            && entry.dev_minor == target_minor
+        {
+            return ProcAccess::Ok(true);
+        }
+    }
+
+    ProcAccess::Ok(false)
+}
+
+pub fn parse_socket_inode(link: &str) -> Option<u64> {
+    let rest = link.strip_prefix("socket:[")?;
+    let rest = rest.strip_suffix(']')?;
+    rest.parse::<u64>().ok()
+}
+
+pub fn proto_label(proto: ProcNetProto) -> &'static str {
+    match proto {
+        ProcNetProto::Tcp | ProcNetProto::Tcp6 => "tcp",
+        ProcNetProto::Udp | ProcNetProto::Udp6 => "udp",
+    }
+}
+
+pub fn proto_label_and_sort(proto: ProcNetProto) -> (&'static str, u8) {
+    match proto {
+        ProcNetProto::Tcp | ProcNetProto::Tcp6 => ("tcp", 0),
+        ProcNetProto::Udp | ProcNetProto::Udp6 => ("udp", 1),
+    }
+}
+
+pub fn socket_state_label(proto: ProcNetProto, state: u8) -> String {
+    let label = match proto {
+        ProcNetProto::Tcp | ProcNetProto::Tcp6 => match state {
+            TCP_ESTABLISHED => "established",
+            TCP_LISTEN => "listening",
+            _ => "",
+        },
+        ProcNetProto::Udp | ProcNetProto::Udp6 => match state {
+            UDP_LISTEN => "listening",
+            _ => "",
+        },
+    };
+
+    if label.is_empty() {
+        format!("0x{state:02X}")
+    } else {
+        label.to_string()
+    }
 }
 
 #[cfg(test)]

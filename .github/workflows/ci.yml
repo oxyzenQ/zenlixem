@@ -25,9 +25,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo build (debug)
-        run: cargo build --all-targets
-
       - name: yamllint
         uses: ibiqlik/action-yamllint@v3
         with:
@@ -36,6 +33,11 @@ jobs:
 
       - name: actionlint
         uses: devops-actions/actionlint@e7ee33fbf5aa8c9f9ee1145137f3e52e25d6a35b
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: build.sh check-all
         run: bash ./build.sh check-all --verbose

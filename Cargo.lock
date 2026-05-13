@@ -182,6 +182,9 @@ dependencies = [
 [[package]]
 name = "procscan"
 version = "1.0.1-stable.1"
+dependencies = [
+ "fsmeta",
+]
 
 [[package]]
 name = "quote"

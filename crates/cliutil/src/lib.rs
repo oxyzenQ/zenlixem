@@ -122,3 +122,47 @@ pub fn print_info() {
     println!("License: {}", env!("CARGO_PKG_LICENSE"));
     println!("Source: {}", env!("CARGO_PKG_REPOSITORY"));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_sha_normal() {
+        assert_eq!(
+            short_sha("abcdef1234567890abcdef1234567890abcdef12"),
+            "abcdef1"
+        );
+    }
+
+    #[test]
+    fn short_sha_empty() {
+        assert_eq!(short_sha(""), "");
+    }
+
+    #[test]
+    fn short_sha_short() {
+        assert_eq!(short_sha("abc"), "abc");
+    }
+
+    #[test]
+    fn short_sha_exact_seven() {
+        assert_eq!(short_sha("abcdefg"), "abcdefg");
+    }
+
+    #[test]
+    fn privilege_mode_returns_string() {
+        let mode = privilege_mode();
+        assert!(mode == "privileged" || mode == "unprivileged");
+    }
+
+    #[test]
+    fn build_target_not_empty() {
+        assert!(!build_target().is_empty());
+    }
+
+    #[test]
+    fn git_sha_not_empty() {
+        assert!(!git_sha().is_empty());
+    }
+}

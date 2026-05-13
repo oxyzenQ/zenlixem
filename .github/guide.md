@@ -14,9 +14,9 @@ This repository uses GitHub Actions to keep `main` green and to publish release 
 #### Jobs
 
 - `lint_test`
-  - `cargo build --all-targets` (debug)
   - `yamllint .github/workflows/*`
   - `actionlint .github/workflows/*`
+  - Install `cargo-audit` (via `taiki-e/install-action`)
   - `./build.sh check-all --verbose`
 
 - `build` (matrix)
@@ -65,7 +65,7 @@ The Release workflow automatically decides whether the GitHub Release is a **lat
   - `v1.0.0-beta.1`
   - `v1.0.0-rc.1`
 
-**Rule:** if the tag contains `-` (dash), it is treated as a pre-release.
+**Rule:** if the tag contains `-` and does NOT match `*-stable.*` or `*-stable`, it is treated as a pre-release. Tags like `v1.0.1-stable.1` are treated as stable releases.
 
 ## How to publish a release
 

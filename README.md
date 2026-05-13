@@ -4,7 +4,7 @@
 
 zenlixem is a small, Linux-focused CLI suite for system introspection.
 
-## Tools (v1.0.0)
+## Tools (v1.0.1)
 
 - `zenlixem` — suite wrapper (includes `zenlixem doctor`)
 - `whoholds` — who holds this file / device / port
@@ -196,6 +196,19 @@ envpath gcc
 whyopen /mnt/data
 whyopen 8080
 ```
+
+## Common Flags
+
+All tools support:
+
+- `-i` / `--info` — print build and version information
+- `--json` — output result as JSON
+
+`whoholds` additionally supports:
+
+- `--ports` — scan all ports
+- `--listening` — filter to listening sockets (use with `--ports`)
+- `--established` — filter to established TCP sockets (use with `--ports`)
 
 ## Notes
 

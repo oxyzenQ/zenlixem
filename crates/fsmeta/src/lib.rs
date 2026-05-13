@@ -48,7 +48,10 @@ pub fn format_duration_ago(d: Duration) -> String {
 
 pub fn format_systemtime_ago(t: SystemTime) -> String {
     let now = SystemTime::now();
-    let d = now.duration_since(t).unwrap_or(Duration::from_secs(0));
+    let d = match now.duration_since(t) {
+        Ok(d) => d,
+        Err(_) => return "just now".to_string(), // clock skew: t is in the future
+    };
     format_duration_ago(d)
 }
 
@@ -82,5 +85,21 @@ mod tests {
     #[test]
     fn dev_major_minor_smoke() {
         let (_maj, _min) = dev_major_minor(0);
+    }
+
+    #[test]
+    fn dev_major_minor_known_values() {
+        // /dev/sda1 typically has major=8, minor=1 encoded as 0x0801
+        assert_eq!(dev_major_minor(0x0801), (8, 1));
+        // /dev/sda2 typically has major=8, minor=2
+        assert_eq!(dev_major_minor(0x0802), (8, 2));
+        // /dev/sdb1 typically has major=8, minor=17
+        assert_eq!(dev_major_minor(0x0811), (8, 17));
+    }
+
+    #[test]
+    fn format_systemtime_future_returns_just_now() {
+        let future = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(format_systemtime_ago(future), "just now");
     }
 }

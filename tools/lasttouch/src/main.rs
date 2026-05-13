@@ -134,9 +134,10 @@ fn run(args: Args) -> Result<(), AppError> {
     };
     let mtime = md.modified().map_err(|e| AppError::Fatal(e.to_string()))?;
 
-    let info = if let Some(info) = try_audit_log(&path).map_err(AppError::Fatal)? {
+    let passwd = parse_passwd().unwrap_or_default();
+    let info = if let Some(info) = try_audit_log(&path, &passwd).map_err(AppError::Fatal)? {
         info
-    } else if let Some(info) = try_journalctl(&path).map_err(AppError::Fatal)? {
+    } else if let Some(info) = try_journalctl(&path, &passwd).map_err(AppError::Fatal)? {
         info
     } else {
         TouchInfo {
@@ -224,7 +225,7 @@ fn uid_to_user(uid: u32, passwd: &HashMap<u32, String>) -> String {
     passwd.get(&uid).cloned().unwrap_or_else(|| uid.to_string())
 }
 
-fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
+fn try_audit_log(path: &Path, passwd: &HashMap<u32, String>) -> Result<Option<TouchInfo>, String> {
     let audit_path = Path::new("/var/log/audit/audit.log");
     if !audit_path.exists() {
         return Ok(None);
@@ -237,8 +238,6 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
             return Ok(None);
         }
     };
-
-    let passwd = parse_passwd().unwrap_or_default();
 
     let reader = io::BufReader::new(f);
 
@@ -269,6 +268,13 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
             continue;
         };
 
+        // Only track SYSCALL and PATH lines to reduce memory usage
+        let is_syscall = line.contains("type=SYSCALL");
+        let is_path = line.contains("type=PATH");
+        if !is_syscall && !is_path {
+            continue;
+        }
+
         let entry = events.entry(msg_id.clone()).or_default();
 
         if entry.sec == 0 {
@@ -277,7 +283,7 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
             }
         }
 
-        if line.contains("type=SYSCALL") {
+        if is_syscall {
             entry.syscall = extract_kv_u64(&line, "syscall");
             entry.uid = extract_kv_u32(&line, "uid");
             entry.comm = extract_kv_string(&line, "comm");
@@ -286,7 +292,7 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
             entry.success = extract_kv_string(&line, "success").map(|s| s == "yes");
         }
 
-        if line.contains("type=PATH") {
+        if is_path {
             if let Some(name) = extract_kv_string(&line, "name") {
                 if name == target {
                     entry.has_target_path = true;
@@ -323,7 +329,7 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
     };
 
     let uid = ev.uid.unwrap_or(0);
-    let user = uid_to_user(uid, &passwd);
+    let user = uid_to_user(uid, passwd);
     let process = ev.comm.clone().unwrap_or_else(|| "unknown".to_string());
     let time = UNIX_EPOCH + Duration::from_secs(sec);
 
@@ -460,7 +466,7 @@ fn extract_kv_hex_u64(line: &str, key: &str) -> Option<u64> {
     u64::from_str_radix(&s, 16).ok()
 }
 
-fn try_journalctl(path: &Path) -> Result<Option<TouchInfo>, String> {
+fn try_journalctl(path: &Path, passwd: &HashMap<u32, String>) -> Result<Option<TouchInfo>, String> {
     let escaped = escape_journal_regex(&path.to_string_lossy());
 
     let output = Command::new("journalctl")
@@ -504,9 +510,12 @@ fn try_journalctl(path: &Path) -> Result<Option<TouchInfo>, String> {
         }
     }
 
-    let ts_us = fields
+    let Some(us) = fields
         .get("__REALTIME_TIMESTAMP")
-        .and_then(|s| s.parse::<u64>().ok());
+        .and_then(|s| s.parse::<u64>().ok())
+    else {
+        return Ok(None);
+    };
 
     let uid = fields.get("_UID").and_then(|s| s.parse::<u32>().ok());
 
@@ -516,15 +525,11 @@ fn try_journalctl(path: &Path) -> Result<Option<TouchInfo>, String> {
         .or_else(|| fields.get("SYSLOG_IDENTIFIER").cloned())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let passwd = parse_passwd().unwrap_or_default();
     let user = uid
-        .map(|u| uid_to_user(u, &passwd))
+        .map(|u| uid_to_user(u, passwd))
         .unwrap_or_else(|| "unknown".to_string());
 
-    let time = match ts_us {
-        Some(us) => UNIX_EPOCH + Duration::from_micros(us),
-        None => SystemTime::now(),
-    };
+    let time = UNIX_EPOCH + Duration::from_micros(us);
 
     Ok(Some(TouchInfo {
         user,
@@ -548,4 +553,128 @@ fn escape_journal_regex(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_audit_msg_id_valid() {
+        let line = r#"type=SYSCALL msg=audit(1700000000.123:456): arch=40000003"#;
+        assert_eq!(
+            extract_audit_msg_id(line),
+            Some("1700000000.123:456".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_audit_msg_id_missing() {
+        let line = "type=CWD msg= something else";
+        assert_eq!(extract_audit_msg_id(line), None);
+    }
+
+    #[test]
+    fn extract_audit_seconds_valid() {
+        let line = r#"type=SYSCALL msg=audit(1700000000.123:456):"#;
+        assert_eq!(extract_audit_seconds(line), Some(1700000000));
+    }
+
+    #[test]
+    fn extract_audit_seconds_missing() {
+        let line = "no audit timestamp here";
+        assert_eq!(extract_audit_seconds(line), None);
+    }
+
+    #[test]
+    fn extract_kv_string_quoted() {
+        let line = r#"comm="myapp" syscall=2"#;
+        assert_eq!(extract_kv_string(line, "comm"), Some("myapp".to_string()));
+    }
+
+    #[test]
+    fn extract_kv_string_unquoted() {
+        let line = r#"syscall=257 success=yes"#;
+        assert_eq!(extract_kv_string(line, "syscall"), Some("257".to_string()));
+    }
+
+    #[test]
+    fn extract_kv_string_missing() {
+        let line = r#"comm="myapp""#;
+        assert_eq!(extract_kv_string(line, "uid"), None);
+    }
+
+    #[test]
+    fn extract_kv_u64_valid() {
+        let line = "syscall=257 success=yes";
+        assert_eq!(extract_kv_u64(line, "syscall"), Some(257));
+    }
+
+    #[test]
+    fn extract_kv_u32_valid() {
+        let line = "uid=1000 gid=1000";
+        assert_eq!(extract_kv_u32(line, "uid"), Some(1000));
+    }
+
+    #[test]
+    fn extract_kv_hex_u64_valid() {
+        let line = "a1=8001 a2=42";
+        assert_eq!(extract_kv_hex_u64(line, "a1"), Some(0x8001));
+    }
+
+    #[test]
+    fn open_flags_modify_wronly() {
+        assert!(open_flags_modify(0o1)); // O_WRONLY
+    }
+
+    #[test]
+    fn open_flags_modify_rdwr() {
+        assert!(open_flags_modify(0o2)); // O_RDWR
+    }
+
+    #[test]
+    fn open_flags_modify_trunc() {
+        assert!(open_flags_modify(0o1000)); // O_TRUNC
+    }
+
+    #[test]
+    fn open_flags_modify_creat() {
+        assert!(open_flags_modify(0o100)); // O_CREAT
+    }
+
+    #[test]
+    fn open_flags_modify_rdonly() {
+        assert!(!open_flags_modify(0o0)); // O_RDONLY
+    }
+
+    #[test]
+    fn audit_event_is_modification_x86_64_unlink() {
+        // On x86_64, unlink is syscall 87 — always a modification
+        if std::env::consts::ARCH == "x86_64" {
+            assert!(audit_event_is_modification(87, None, None));
+        }
+    }
+
+    #[test]
+    fn audit_event_is_modification_aarch64_unlinkat() {
+        // On aarch64, unlinkat is syscall 54 — always a modification
+        if std::env::consts::ARCH == "aarch64" {
+            assert!(audit_event_is_modification(54, None, None));
+        }
+    }
+
+    #[test]
+    fn audit_event_is_modification_unknown_syscall() {
+        // Syscall 99999 should never be a modification
+        assert!(!audit_event_is_modification(99999, None, None));
+    }
+
+    #[test]
+    fn escape_journal_regex() {
+        assert_eq!(
+            super::escape_journal_regex("/etc/foo.bar"),
+            r"/etc/foo\.bar"
+        );
+        assert_eq!(super::escape_journal_regex("test[0]"), r"test\[0\]");
+    }
 }

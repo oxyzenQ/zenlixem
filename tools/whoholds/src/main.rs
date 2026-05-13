@@ -2,17 +2,17 @@ use clap::{error::ErrorKind, Parser};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
     error, print_header, print_info, print_json_error, print_version, privilege_mode,
     privilege_mode_message, AppError,
 };
-use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
+use fsmeta::{dev_major_minor, file_id_for_path};
 use procscan::{
-    list_pids, read_comm_access, read_fd_links_access, read_proc_maps_access,
-    read_proc_net_sockets, ProcAccess, ProcNetProto,
+    list_pids, parse_socket_inode, proto_label_and_sort, read_comm_access, read_fd_links_access,
+    read_proc_net_sockets, scan_pid_mmap_file, scan_pid_open_fd_file, socket_state_label,
+    ProcAccess, ProcNetProto, TCP_ESTABLISHED, TCP_LISTEN, UDP_LISTEN,
 };
 
 const COMMAND_COL_WIDTH: usize = 16;
@@ -241,15 +241,16 @@ fn whoholds_ports(listening: bool, established: bool, json_out: bool) -> Result<
     sockets.retain(|s| {
         if listening {
             if matches!(s.proto, ProcNetProto::Tcp | ProcNetProto::Tcp6) {
-                return s.state == 0x0A;
+                return s.state == TCP_LISTEN;
             }
             if matches!(s.proto, ProcNetProto::Udp | ProcNetProto::Udp6) {
-                return s.state == 0x07;
+                return s.state == UDP_LISTEN;
             }
             return false;
         }
         if established {
-            return matches!(s.proto, ProcNetProto::Tcp | ProcNetProto::Tcp6) && s.state == 0x01;
+            return matches!(s.proto, ProcNetProto::Tcp | ProcNetProto::Tcp6)
+                && s.state == TCP_ESTABLISHED;
         }
         true
     });
@@ -355,33 +356,6 @@ fn whoholds_ports(listening: bool, established: bool, json_out: bool) -> Result<
         print_ports(rows, skipped_permission_denied.len());
     }
     Ok(())
-}
-
-fn proto_label_and_sort(proto: ProcNetProto) -> (&'static str, u8) {
-    match proto {
-        ProcNetProto::Tcp | ProcNetProto::Tcp6 => ("tcp", 0),
-        ProcNetProto::Udp | ProcNetProto::Udp6 => ("udp", 1),
-    }
-}
-
-fn socket_state_label(proto: ProcNetProto, state: u8) -> String {
-    let label = match proto {
-        ProcNetProto::Tcp | ProcNetProto::Tcp6 => match state {
-            0x01 => "established",
-            0x0A => "listening",
-            _ => "",
-        },
-        ProcNetProto::Udp | ProcNetProto::Udp6 => match state {
-            0x07 => "listening",
-            _ => "",
-        },
-    };
-
-    if label.is_empty() {
-        format!("0x{state:02X}")
-    } else {
-        label.to_string()
-    }
 }
 
 fn whoholds_path(path: &Path, json_out: bool) -> Result<(), AppError> {
@@ -521,57 +495,6 @@ fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
     Ok(())
 }
 
-fn scan_pid_open_fd_file(pid: i32, target: FileId) -> ProcAccess<bool> {
-    let links = match read_fd_links_access(pid) {
-        ProcAccess::Ok(v) => v,
-        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
-        ProcAccess::Gone => return ProcAccess::Gone,
-        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
-    };
-
-    for (_fd, fd_path, _link) in links {
-        let md = match fs::metadata(&fd_path) {
-            Ok(md) => md,
-            Err(_) => continue,
-        };
-
-        if file_id_for_metadata(&md) == target {
-            return ProcAccess::Ok(true);
-        }
-    }
-
-    ProcAccess::Ok(false)
-}
-
-fn scan_pid_mmap_file(
-    pid: i32,
-    target_major: u32,
-    target_minor: u32,
-    target_inode: u64,
-) -> ProcAccess<bool> {
-    let maps = match read_proc_maps_access(pid) {
-        ProcAccess::Ok(v) => v,
-        ProcAccess::PermissionDenied => return ProcAccess::PermissionDenied,
-        ProcAccess::Gone => return ProcAccess::Gone,
-        ProcAccess::Fatal(e) => return ProcAccess::Fatal(e),
-    };
-
-    for entry in maps {
-        if entry.inode == 0 {
-            continue;
-        }
-
-        if entry.inode == target_inode
-            && entry.dev_major == target_major
-            && entry.dev_minor == target_minor
-        {
-            return ProcAccess::Ok(true);
-        }
-    }
-
-    ProcAccess::Ok(false)
-}
-
 fn scan_pid_open_fd_socket(pid: i32, inodes: &HashSet<u64>) -> ProcAccess<bool> {
     let links = match read_fd_links_access(pid) {
         ProcAccess::Ok(v) => v,
@@ -591,12 +514,6 @@ fn scan_pid_open_fd_socket(pid: i32, inodes: &HashSet<u64>) -> ProcAccess<bool> 
     }
 
     ProcAccess::Ok(false)
-}
-
-fn parse_socket_inode(link: &str) -> Option<u64> {
-    let rest = link.strip_prefix("socket:[")?;
-    let rest = rest.strip_suffix(']')?;
-    rest.parse::<u64>().ok()
 }
 
 fn print_ports(rows: Vec<PortRow>, skipped_permission_denied: usize) {
