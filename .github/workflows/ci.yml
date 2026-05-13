@@ -21,6 +21,9 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # ── Job 1: Detect changed file categories ──────────────────────────────
   changes:
@@ -54,18 +57,22 @@ jobs:
             # Handle first commit, force push, or missing before SHA
             if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
               echo "⚠ Cannot determine push base; defaulting to full CI"
-              echo "full_ci=true" >> "$GITHUB_OUTPUT"
-              echo "docs_only=false" >> "$GITHUB_OUTPUT"
-              echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
-              echo "reason=push_base_unavailable" >> "$GITHUB_OUTPUT"
+              {
+                echo "full_ci=true"
+                echo "docs_only=false"
+                echo "changed_files=unknown"
+                echo "reason=push_base_unavailable"
+              } >> "$GITHUB_OUTPUT"
               exit 0
             fi
           else
             # Unknown event type: safe default
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
-            echo "reason=unknown_event" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=true"
+              echo "docs_only=false"
+              echo "changed_files=unknown"
+              echo "reason=unknown_event"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -74,20 +81,24 @@ jobs:
           # fall back to full CI if git diff fails.
           if ! CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null); then
             echo "⚠ git diff failed; defaulting to full CI"
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
-            echo "reason=git_diff_failed" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=true"
+              echo "docs_only=false"
+              echo "changed_files=unknown"
+              echo "reason=git_diff_failed"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Handle empty diff (shouldn't happen, but be safe)
           if [ -z "$CHANGED" ]; then
             echo "⚠ No changed files detected; defaulting to full CI"
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_files=none" >> "$GITHUB_OUTPUT"
-            echo "reason=empty_diff" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=true"
+              echo "docs_only=false"
+              echo "changed_files=none"
+              echo "reason=empty_diff"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -159,21 +170,27 @@ jobs:
           CHANGED_FLAT=$(echo "$CHANGED" | tr '\n' ' ' | xargs)
 
           if [ "$has_critical" = true ]; then
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
-            echo "reason=critical_file_changed" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=true"
+              echo "docs_only=false"
+              echo "changed_files=${CHANGED_FLAT}"
+              echo "reason=critical_file_changed"
+            } >> "$GITHUB_OUTPUT"
           elif [ "$all_docs" = true ]; then
-            echo "full_ci=false" >> "$GITHUB_OUTPUT"
-            echo "docs_only=true" >> "$GITHUB_OUTPUT"
-            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
-            echo "reason=docs_only" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=false"
+              echo "docs_only=true"
+              echo "changed_files=${CHANGED_FLAT}"
+              echo "reason=docs_only"
+            } >> "$GITHUB_OUTPUT"
           else
             # Unknown/suspicious file type: safe default to full CI
-            echo "full_ci=true" >> "$GITHUB_OUTPUT"
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
-            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
-            echo "reason=non_docs_non_critical_file_changed:${non_docs_files}" >> "$GITHUB_OUTPUT"
+            {
+              echo "full_ci=true"
+              echo "docs_only=false"
+              echo "changed_files=${CHANGED_FLAT}"
+              echo "reason=non_docs_non_critical_file_changed:${non_docs_files}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
           echo ""
