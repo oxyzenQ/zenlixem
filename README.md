@@ -1,4 +1,13 @@
-# zenlixem
+<p align="center">
+  <img src="assets/zenlixem-logo-v2.png" alt="Zenlixem logo" width="180">
+</p>
+
+<p align="center">
+  <strong>Zenlixem</strong><br>
+  <em>Linux introspection suite</em>
+</p>
+
+---
 
 zenlixem is a small, Linux-focused CLI suite for system introspection.
 
@@ -219,3 +228,9 @@ All tools support:
 - **Containers and namespaces**: when running inside a container, `/proc` shows only the container's PID namespace. whoholds/whyopen will not see host processes or sockets outside the container's network namespace.
 - **Audit log parsing** only covers x86_64 and aarch64 syscall tables. On other Linux architectures, lasttouch will fall back to the x86_64 table with a warning, which may misclassify events.
 - **Race conditions**: processes may exit or be recycled between the time their PID is enumerated and their fd/maps are read. The tools tolerate vanished PIDs gracefully but may miss short-lived processes.
+
+## License
+
+Zenlixem source code and documentation are licensed under the MIT License. See [LICENSE](LICENSE).
+
+The Zenlixem name, logo, and related branding assets are project trademarks/brand identifiers. Use of the code under the MIT License does not grant rights to use the Zenlixem name or logo in a way that suggests official endorsement, affiliation, or ownership. See [TRADEMARK.md](TRADEMARK.md).
