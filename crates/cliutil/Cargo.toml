@@ -11,3 +11,10 @@ license.workspace = true
 build = "build.rs"
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+clap = { workspace = true, optional = true }
+
+[features]
+default = []
+clap = ["dep:clap"]

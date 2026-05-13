@@ -1,5 +1,4 @@
 use clap::{error::ErrorKind, Parser};
-use serde::Serialize;
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -7,20 +6,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_version, privilege_mode, privilege_mode_message, warn,
+    error, print_header, print_info, print_json_error, print_version, privilege_mode,
+    privilege_mode_message, warn, AppError,
 };
-
-enum AppError {
-    InvalidInput(String),
-    #[allow(dead_code)]
-    Fatal(String),
-}
-
-#[derive(Serialize)]
-struct JsonError {
-    kind: &'static str,
-    error: String,
-}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -110,20 +98,6 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-fn print_json_error(err: AppError) {
-    let (kind, msg) = match err {
-        AppError::InvalidInput(e) => ("invalid_input", e),
-        AppError::Fatal(e) => ("fatal", e),
-    };
-    let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
 }
 
 fn run(args: Args) -> Result<(), AppError> {

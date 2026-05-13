@@ -6,7 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_version, privilege_mode, privilege_mode_message,
+    error, print_header, print_info, print_json_error, print_version, privilege_mode,
+    privilege_mode_message, AppError,
 };
 use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
 use procscan::{
@@ -100,17 +101,22 @@ fn print_json_ports(
 fn print_json_holders(
     mode: &'static str,
     target: String,
-    holders: BTreeMap<i32, (Reason, String)>,
+    holders: BTreeMap<i32, (Vec<Reason>, String)>,
     skipped_permission_denied: usize,
 ) {
     let partial = skipped_permission_denied > 0;
     let mut rows: Vec<HolderRow> = Vec::new();
 
-    for (pid, (reason, comm)) in holders {
+    for (pid, (reasons, comm)) in holders {
+        let reason_str = reasons
+            .iter()
+            .map(|r| r.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         rows.push(HolderRow {
             pid,
             command: comm,
-            reason: reason.as_str().to_string(),
+            reason: reason_str,
         });
     }
 
@@ -127,17 +133,6 @@ fn print_json_holders(
         "{}",
         serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
     );
-}
-
-enum AppError {
-    InvalidInput(String),
-    Fatal(String),
-}
-
-#[derive(Serialize)]
-struct JsonError {
-    kind: &'static str,
-    error: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -193,20 +188,6 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-fn print_json_error(err: AppError) {
-    let (kind, msg) = match err {
-        AppError::InvalidInput(e) => ("invalid_input", e),
-        AppError::Fatal(e) => ("fatal", e),
-    };
-    let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
 }
 
 fn run(args: Args) -> Result<(), AppError> {
@@ -358,7 +339,7 @@ fn whoholds_ports(listening: bool, established: bool, json_out: bool) -> Result<
         }
     }
 
-    rows.sort_by(|a, b| (a.port, a.proto_sort, a.pid).cmp(&(b.port, b.proto_sort, b.pid)));
+    rows.sort_by_key(|a| (a.port, a.proto_sort, a.pid));
     rows.dedup_by(|a, b| {
         a.port == b.port && a.proto_sort == b.proto_sort && a.pid == b.pid && a.state == b.state
     });
@@ -416,69 +397,64 @@ fn whoholds_path(path: &Path, json_out: bool) -> Result<(), AppError> {
     };
     let (tmaj, tmin) = dev_major_minor(target_id.dev);
 
-    let mut holders: BTreeMap<i32, (Reason, String)> = BTreeMap::new();
+    let mut holders: BTreeMap<i32, (Vec<Reason>, String)> = BTreeMap::new();
     let mut skipped_permission_denied: HashSet<i32> = HashSet::new();
 
     let pids = list_pids().map_err(|e| AppError::Fatal(e.to_string()))?;
 
     for pid in pids {
-        let mut open_fd_denied = false;
+        let mut reasons: Vec<Reason> = Vec::new();
+        let mut any_denied = false;
+        let mut comm: Option<String> = None;
+
         match scan_pid_open_fd_file(pid, target_id) {
             ProcAccess::Ok(true) => {
-                let comm = match read_comm_access(pid) {
-                    ProcAccess::Ok(s) => s,
-                    ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
-                        "<unknown>".to_string()
-                    }
-                };
-                holders.insert(pid, (Reason::OpenFd, comm));
-                continue;
+                reasons.push(Reason::OpenFd);
+                comm = Some(read_comm_best_effort(pid));
             }
             ProcAccess::Ok(false) => {}
             ProcAccess::PermissionDenied => {
-                open_fd_denied = true;
+                any_denied = true;
             }
-            ProcAccess::Gone => {
-                continue;
-            }
+            ProcAccess::Gone => continue,
             ProcAccess::Fatal(e) => {
                 return Err(AppError::Fatal(e.to_string()));
             }
         }
 
-        let mut maps_denied = false;
         match scan_pid_mmap_file(pid, tmaj, tmin, target_id.inode) {
             ProcAccess::Ok(true) => {
-                let comm = match read_comm_access(pid) {
-                    ProcAccess::Ok(s) => s,
-                    ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
-                        "<unknown>".to_string()
-                    }
-                };
-                holders.insert(pid, (Reason::Mmap, comm));
+                reasons.push(Reason::Mmap);
+                if comm.is_none() {
+                    comm = Some(read_comm_best_effort(pid));
+                }
             }
             ProcAccess::Ok(false) => {}
             ProcAccess::PermissionDenied => {
-                maps_denied = true;
+                any_denied = true;
             }
-            ProcAccess::Gone => {
-                continue;
-            }
+            ProcAccess::Gone => continue,
             ProcAccess::Fatal(e) => {
                 return Err(AppError::Fatal(e.to_string()));
             }
         }
 
-        if open_fd_denied && maps_denied {
-            skipped_permission_denied.insert(pid);
+        if reasons.is_empty() {
+            if any_denied {
+                skipped_permission_denied.insert(pid);
+            }
+            continue;
         }
+
+        let comm = comm.unwrap_or_else(|| "<unknown>".to_string());
+        holders.insert(pid, (reasons, comm));
     }
 
     if json_out {
         print_json_holders(
             "path",
             path.display().to_string(),
-            holders.clone(),
+            holders,
             skipped_permission_denied.len(),
         );
     } else {
@@ -496,7 +472,7 @@ fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
         .map(|s| s.inode)
         .collect();
 
-    let mut holders: BTreeMap<i32, (Reason, String)> = BTreeMap::new();
+    let mut holders: BTreeMap<i32, (Vec<Reason>, String)> = BTreeMap::new();
     let mut skipped_permission_denied: HashSet<i32> = HashSet::new();
 
     if target_inodes.is_empty() {
@@ -518,13 +494,8 @@ fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
     for pid in pids {
         match scan_pid_open_fd_socket(pid, &target_inodes) {
             ProcAccess::Ok(true) => {
-                let comm = match read_comm_access(pid) {
-                    ProcAccess::Ok(s) => s,
-                    ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
-                        "<unknown>".to_string()
-                    }
-                };
-                holders.insert(pid, (Reason::OpenFd, comm));
+                let comm = read_comm_best_effort(pid);
+                holders.insert(pid, (vec![Reason::OpenFd], comm));
             }
             ProcAccess::Ok(false) => {}
             ProcAccess::PermissionDenied => {
@@ -541,7 +512,7 @@ fn whoholds_port(port: u16, json_out: bool) -> Result<(), AppError> {
         print_json_holders(
             "port",
             port.to_string(),
-            holders.clone(),
+            holders,
             skipped_permission_denied.len(),
         );
     } else {
@@ -663,7 +634,16 @@ fn print_ports(rows: Vec<PortRow>, skipped_permission_denied: usize) {
     }
 }
 
-fn print_holders(holders: BTreeMap<i32, (Reason, String)>, skipped_permission_denied: usize) {
+fn read_comm_best_effort(pid: i32) -> String {
+    match read_comm_access(pid) {
+        ProcAccess::Ok(s) => s,
+        ProcAccess::PermissionDenied | ProcAccess::Gone | ProcAccess::Fatal(_) => {
+            "<unknown>".to_string()
+        }
+    }
+}
+
+fn print_holders(holders: BTreeMap<i32, (Vec<Reason>, String)>, skipped_permission_denied: usize) {
     println!("{}", privilege_mode_message());
     if skipped_permission_denied > 0 {
         println!(
@@ -685,10 +665,14 @@ fn print_holders(holders: BTreeMap<i32, (Reason, String)>, skipped_permission_de
         width = COMMAND_COL_WIDTH
     ));
 
-    for (pid, (reason, comm)) in holders {
+    for (pid, (reasons, comm)) in holders {
+        let reason_str = reasons
+            .iter()
+            .map(|r| r.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
         println!(
-            "{pid:<5} {comm:<width$} {}",
-            reason.as_str(),
+            "{pid:<5} {comm:<width$} {reason_str}",
             width = COMMAND_COL_WIDTH
         );
     }

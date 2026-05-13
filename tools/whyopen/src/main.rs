@@ -6,7 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cliutil::{
-    error, print_header, print_info, print_version, privilege_mode, privilege_mode_message,
+    error, print_header, print_info, print_json_error, print_version, privilege_mode,
+    privilege_mode_message, AppError,
 };
 use fsmeta::{dev_major_minor, file_id_for_metadata, file_id_for_path, FileId};
 use procscan::{
@@ -52,17 +53,6 @@ struct Args {
         help = "File path or port number to inspect"
     )]
     target: Option<String>,
-}
-
-enum AppError {
-    InvalidInput(String),
-    Fatal(String),
-}
-
-#[derive(Serialize)]
-struct JsonError {
-    kind: &'static str,
-    error: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -119,20 +109,6 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-fn print_json_error(err: AppError) {
-    let (kind, msg) = match err {
-        AppError::InvalidInput(e) => ("invalid_input", e),
-        AppError::Fatal(e) => ("fatal", e),
-    };
-    let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
 }
 
 fn run(args: Args) -> Result<(), AppError> {

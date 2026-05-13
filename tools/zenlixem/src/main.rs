@@ -8,8 +8,8 @@ use std::path::Path;
 use std::process::Command;
 
 use cliutil::{
-    build_target, error, git_sha, print_header, print_info, print_version, privilege_mode,
-    privilege_mode_message,
+    build_target, error, git_sha, print_header, print_info, print_json_error, print_version,
+    privilege_mode, privilege_mode_message, short_sha, AppError,
 };
 use procscan::{list_pids, read_proc_net_sockets, ProcAccess};
 
@@ -79,18 +79,6 @@ struct CompletionsArgs {
     shell: Option<Shell>,
 }
 
-enum AppError {
-    InvalidInput(String),
-    #[allow(dead_code)]
-    Fatal(String),
-}
-
-#[derive(Serialize)]
-struct JsonError {
-    kind: &'static str,
-    error: String,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum CheckStatus {
@@ -144,20 +132,6 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-fn print_json_error(err: AppError) {
-    let (kind, msg) = match err {
-        AppError::InvalidInput(e) => ("invalid_input", e),
-        AppError::Fatal(e) => ("fatal", e),
-    };
-    let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
 }
 
 fn run(args: Args) -> Result<i32, AppError> {
@@ -279,10 +253,6 @@ fn run_doctor(json_out: bool) -> i32 {
     println!("Build: {} ({})", build_target(), short_sha(git_sha()));
 
     exit_code
-}
-
-fn short_sha(sha: &str) -> &str {
-    sha.get(0..7).unwrap_or(sha)
 }
 
 fn collect_checks() -> Vec<CheckResult> {
@@ -464,7 +434,6 @@ fn check_build_metadata() -> CheckResult {
     }
 }
 
-#[allow(dead_code)]
 fn check_proc_access_smoke() -> CheckResult {
     match procscan::read_comm_access(1) {
         ProcAccess::Ok(_) => CheckResult {

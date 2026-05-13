@@ -1,5 +1,41 @@
 use std::io::{self, IsTerminal, Write};
 
+use serde::Serialize;
+
+/// Common error type for CLI tools.
+///
+/// `InvalidInput` exits code 1; `Fatal` exits code 2.
+#[derive(Debug)]
+pub enum AppError {
+    InvalidInput(String),
+    Fatal(String),
+}
+
+/// JSON error payload used by `print_json_error`.
+#[derive(Serialize)]
+pub struct JsonError {
+    pub kind: &'static str,
+    pub error: String,
+}
+
+/// Print a JSON-formatted error to stdout.
+///
+/// Used when `--json` was requested and an error must be reported
+/// in machine-readable form instead of human-readable stderr.
+pub fn print_json_error(err: AppError) {
+    let (kind, msg) = match err {
+        AppError::InvalidInput(e) => ("invalid_input", e),
+        AppError::Fatal(e) => ("fatal", e),
+    };
+    let payload = JsonError { kind, error: msg };
+    println!(
+        "{}",
+        serde_json::to_string(&payload).unwrap_or_else(|_| {
+            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
+        })
+    );
+}
+
 fn effective_uid() -> Option<u32> {
     let s = std::fs::read_to_string("/proc/self/status").ok()?;
     for line in s.lines() {
@@ -71,7 +107,7 @@ pub fn privilege_mode_message() -> &'static str {
     }
 }
 
-fn short_sha(sha: &str) -> &str {
+pub fn short_sha(sha: &str) -> &str {
     sha.get(0..7).unwrap_or(sha)
 }
 

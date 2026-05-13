@@ -1,5 +1,4 @@
 use clap::{error::ErrorKind, Parser};
-use serde::Serialize;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
@@ -9,21 +8,10 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use cliutil::{
-    error, print_header, print_info as print_suite_info, print_version, privilege_mode,
-    privilege_mode_message, warn,
+    error, print_header, print_info as print_suite_info, print_json_error, print_version,
+    privilege_mode, privilege_mode_message, warn, AppError,
 };
 use fsmeta::format_systemtime_ago;
-
-enum AppError {
-    InvalidInput(String),
-    Fatal(String),
-}
-
-#[derive(Serialize)]
-struct JsonError {
-    kind: &'static str,
-    error: String,
-}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -109,20 +97,6 @@ fn main() {
             std::process::exit(2);
         }
     }
-}
-
-fn print_json_error(err: AppError) {
-    let (kind, msg) = match err {
-        AppError::InvalidInput(e) => ("invalid_input", e),
-        AppError::Fatal(e) => ("fatal", e),
-    };
-    let payload = JsonError { kind, error: msg };
-    println!(
-        "{}",
-        serde_json::to_string(&payload).unwrap_or_else(|_| {
-            "{\"kind\":\"fatal\",\"error\":\"json serialization failed\"}".to_string()
-        })
-    );
 }
 
 fn run(args: Args) -> Result<(), AppError> {
@@ -362,18 +336,75 @@ fn try_audit_log(path: &Path) -> Result<Option<TouchInfo>, String> {
     }))
 }
 
+/// x86_64 syscall numbers that modify filesystem state.
+const MODIFY_SYSCALLS_X86_64: &[u64] = &[
+    76,  /* truncate */
+    77,  /* ftruncate */
+    82,  /* rename */
+    87,  /* unlink */
+    90,  /* chmod */
+    92,  /* chown */
+    260, /* unlinkat */
+    263, /* renameat */
+    264, /* renameat2 */
+    268, /* fchmodat */
+    280, /* fchownat */
+    316, /* renameat2 (alt) */
+];
+
+/// aarch64 syscall numbers that modify filesystem state.
+const MODIFY_SYSCALLS_AARCH64: &[u64] = &[
+    46, /* ftruncate */
+    48, /* faccessat */
+    49, /* chdir */
+    52, /* renameat */
+    53, /* mkdirat */
+    54, /* unlinkat */
+    55, /* symlinkat */
+    56, /* openat */
+    58, /* linkat */
+    59, /* renameat2 */
+    64, /* fchownat */
+    67, /* fchmodat */
+];
+
+/// x86_64: open(2) passes flags in a1; openat(257) passes flags in a2.
+const SYSCALL_OPEN_X86_64: u64 = 2;
+const SYSCALL_OPENAT_X86_64: u64 = 257;
+
+/// aarch64: only openat(56) exists; flags are in a2.
+const SYSCALL_OPENAT_AARCH64: u64 = 56;
+
 fn audit_event_is_modification(syscall: u64, a1: Option<u64>, a2: Option<u64>) -> bool {
-    match syscall {
-        2 => {
-            let flags = a1.unwrap_or(0);
-            open_flags_modify(flags)
+    let arch = std::env::consts::ARCH;
+
+    match arch {
+        "x86_64" => {
+            if syscall == SYSCALL_OPEN_X86_64 {
+                return open_flags_modify(a1.unwrap_or(0));
+            }
+            if syscall == SYSCALL_OPENAT_X86_64 {
+                return open_flags_modify(a2.unwrap_or(0));
+            }
+            MODIFY_SYSCALLS_X86_64.contains(&syscall)
         }
-        257 => {
-            let flags = a2.unwrap_or(0);
-            open_flags_modify(flags)
+        "aarch64" => {
+            if syscall == SYSCALL_OPENAT_AARCH64 {
+                return open_flags_modify(a2.unwrap_or(0));
+            }
+            MODIFY_SYSCALLS_AARCH64.contains(&syscall)
         }
-        76 | 77 | 82 | 87 | 90 | 92 | 260 | 263 | 264 | 268 | 280 | 316 => true,
-        _ => false,
+        _ => {
+            // Unknown architecture: fall back to x86_64 table
+            // so that existing behaviour is preserved on untested arches.
+            if syscall == SYSCALL_OPEN_X86_64 {
+                return open_flags_modify(a1.unwrap_or(0));
+            }
+            if syscall == SYSCALL_OPENAT_X86_64 {
+                return open_flags_modify(a2.unwrap_or(0));
+            }
+            MODIFY_SYSCALLS_X86_64.contains(&syscall)
+        }
     }
 }
 
