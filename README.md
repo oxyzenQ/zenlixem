@@ -2,7 +2,7 @@
 
 zenlixem is a small, Linux-focused CLI suite for system introspection.
 
-## Tools (v1.0.1)
+## Tools (v1.0.2)
 
 - `zenlixem` — suite wrapper (includes `zenlixem doctor`)
 - `whoholds` — who holds this file / device / port
