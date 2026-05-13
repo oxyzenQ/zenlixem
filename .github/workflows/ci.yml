@@ -1,4 +1,16 @@
 ---
+# Path-aware CI: skip heavy Rust compilation for docs/branding-only changes.
+#
+# Why: Docs, logo, trademark, and license commits should not waste minutes
+# compiling and testing Rust code. This workflow detects changed files and
+# routes to either full Rust CI or a lightweight docs-check.
+#
+# Routing logic:
+#   - Rust source / build / security / CI changes => full CI (fmt, clippy, test, audit, deny)
+#   - Docs / branding / license only            => docs-check (file existence, no Rust)
+#   - Uncertain / tags / first push              => full CI (safe default)
+#   - Release workflow (release.yml)             => always full, never skipped
+
 name: CI
 
 on:
@@ -10,9 +22,224 @@ on:
       - main
 
 jobs:
-  lint_test:
+  # ── Job 1: Detect changed file categories ──────────────────────────────
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      full_ci: ${{ steps.classify.outputs.full_ci }}
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      changed_files: ${{ steps.classify.outputs.changed_files }}
+      reason: ${{ steps.classify.outputs.reason }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify changed files
+        id: classify
+        run: |
+          set -euo pipefail
+
+          # ── Determine the range of commits to inspect ──
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR: compare base...HEAD
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            # Push: use before..SHA if before is valid
+            BASE="${{ github.event.before }}"
+            HEAD="${{ github.sha }}"
+            # Handle first commit, force push, or missing before SHA
+            if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+              echo "⚠ Cannot determine push base; defaulting to full CI"
+              echo "full_ci=true" >> "$GITHUB_OUTPUT"
+              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
+              echo "reason=push_base_unavailable" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            # Unknown event type: safe default
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
+            echo "reason=unknown_event" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # ── List changed files ──
+          # Merge base may not exist locally if fetch-depth was limited;
+          # fall back to full CI if git diff fails.
+          if ! CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null); then
+            echo "⚠ git diff failed; defaulting to full CI"
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_files=unknown" >> "$GITHUB_OUTPUT"
+            echo "reason=git_diff_failed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Handle empty diff (shouldn't happen, but be safe)
+          if [ -z "$CHANGED" ]; then
+            echo "⚠ No changed files detected; defaulting to full CI"
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_files=none" >> "$GITHUB_OUTPUT"
+            echo "reason=empty_diff" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # ── File category patterns ──
+          # Docs/branding-only: changes to these should NOT trigger Rust CI.
+          DOCS_PATTERNS=(
+            '^README\.md$'
+            '^FINAL\.md$'
+            '^TRADEMARK\.md$'
+            '^LICENSE$'
+            '^docs/.*'
+            '^man/.*'
+            '^assets/.*'
+            '.*\.md$'
+          )
+
+          # Critical: changes to these MUST trigger full Rust CI.
+          CRITICAL_PATTERNS=(
+            '^crates/.*'
+            '^tools/.*'
+            '^Cargo\.toml$'
+            '^Cargo\.lock$'
+            '^build\.sh$'
+            '^deny\.toml$'
+            '^\.cargo/.*'
+            '^rust-toolchain.*'
+            '^\.github/workflows/.*'
+          )
+
+          # ── Classify each file ──
+          has_critical=false
+          all_docs=true
+          non_docs_files=""
+
+          while IFS= read -r file; do
+            is_doc=false
+            is_critical=false
+
+            # Check if file matches a docs pattern
+            for pat in "${DOCS_PATTERNS[@]}"; do
+              if echo "$file" | grep -qE "$pat"; then
+                is_doc=true
+                break
+              fi
+            done
+
+            # Check if file matches a critical pattern
+            for pat in "${CRITICAL_PATTERNS[@]}"; do
+              if echo "$file" | grep -qE "$pat"; then
+                is_critical=true
+                break
+              fi
+            done
+
+            if [ "$is_critical" = true ]; then
+              has_critical=true
+            fi
+
+            if [ "$is_doc" = false ]; then
+              all_docs=false
+              non_docs_files="${non_docs_files} ${file}"
+            fi
+          done <<< "$CHANGED"
+
+          # ── Decide routing ──
+          CHANGED_FLAT=$(echo "$CHANGED" | tr '\n' ' ' | xargs)
+
+          if [ "$has_critical" = true ]; then
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
+            echo "reason=critical_file_changed" >> "$GITHUB_OUTPUT"
+          elif [ "$all_docs" = true ]; then
+            echo "full_ci=false" >> "$GITHUB_OUTPUT"
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
+            echo "reason=docs_only" >> "$GITHUB_OUTPUT"
+          else
+            # Unknown/suspicious file type: safe default to full CI
+            echo "full_ci=true" >> "$GITHUB_OUTPUT"
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "changed_files=${CHANGED_FLAT}" >> "$GITHUB_OUTPUT"
+            echo "reason=non_docs_non_critical_file_changed:${non_docs_files}" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo ""
+          echo "── Routing decision ──"
+          echo "  full_ci:      $(grep '^full_ci=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          echo "  docs_only:    $(grep '^docs_only=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          echo "  reason:       $(grep '^reason=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+
+  # ── Job 2: Lightweight docs/branding checks (no Rust) ──────────────────
+  docs-check:
+    name: docs check
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify essential docs exist
+        run: |
+          set -euo pipefail
+          errors=0
+
+          check_file() {
+            if [ ! -f "$1" ]; then
+              echo "❌ Missing: $1"
+              errors=$((errors + 1))
+            else
+              echo "✅ Found: $1"
+            fi
+          }
+
+          check_file README.md
+          check_file LICENSE
+          check_file TRADEMARK.md
+
+          # Verify logo asset if README references it
+          if grep -q 'assets/zenlixem-logo' README.md; then
+            check_file assets/zenlixem-logo-v2.png
+          fi
+
+          # Verify TRADEMARK.md is linked from README
+          if ! grep -q 'TRADEMARK.md' README.md; then
+            echo "⚠ README.md does not link to TRADEMARK.md"
+          fi
+
+          if [ "$errors" -gt 0 ]; then
+            echo "❌ $errors check(s) failed"
+            exit 1
+          fi
+
+          echo "✅ All docs checks passed"
+
+      - name: Summary
+        run: |
+          echo "Docs-only commit detected. Skipped Rust CI."
+          echo "Changed files: ${{ needs.changes.outputs.changed_files }}"
+          echo "Reason: ${{ needs.changes.outputs.reason }}"
+
+  # ── Job 3: Full Rust CI ────────────────────────────────────────────────
+  rust-ci:
     name: fmt / clippy / test
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.full_ci == 'true'
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,7 +277,7 @@ jobs:
   build:
     name: build (${{ matrix.label }})
     runs-on: ubuntu-latest
-    needs: lint_test
+    needs: rust-ci
     strategy:
       fail-fast: false
       matrix:
@@ -81,3 +308,41 @@ jobs:
           ZENLIXEM_GIT_SHA: ${{ github.sha }}
         run: |
           cross build --release --target "${{ matrix.target }}" -p whoholds -p lasttouch -p envpath -p zenlixem -p whyopen
+
+  # ── Job 4: Summary (always runs) ──────────────────────────────────────
+  ci-summary:
+    name: ci summary
+    runs-on: ubuntu-latest
+    needs: [changes, docs-check, rust-ci]
+    if: always()
+
+    steps:
+      - name: Report
+        run: |
+          echo "── CI Summary ──"
+          echo "Changed files: ${{ needs.changes.outputs.changed_files }}"
+          echo "Routing reason: ${{ needs.changes.outputs.reason }}"
+          echo ""
+          echo "Full CI:  ${{ needs.changes.outputs.full_ci }}"
+          echo "Docs only: ${{ needs.changes.outputs.docs_only }}"
+          echo ""
+          echo "docs-check result: ${{ needs.docs-check.result }}"
+          echo "rust-ci result:    ${{ needs.rust-ci.result }}"
+          echo ""
+
+          # Fail the summary if a required job that ran has failed
+          if [ "${{ needs.changes.outputs.full_ci }}" = "true" ]; then
+            if [ "${{ needs.rust-ci.result }}" = "failure" ]; then
+              echo "❌ Rust CI failed"
+              exit 1
+            fi
+            echo "✅ Rust CI passed"
+          fi
+
+          if [ "${{ needs.changes.outputs.docs_only }}" = "true" ]; then
+            if [ "${{ needs.docs-check.result }}" = "failure" ]; then
+              echo "❌ Docs check failed"
+              exit 1
+            fi
+            echo "✅ Docs check passed"
+          fi
